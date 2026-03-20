@@ -12,7 +12,6 @@ export function TopNav({
   setRoute,
   user,
   setUser,
-  dashboardTab,
   setDashboardTab,
   setAuthOpen,
   setAuthIntent,

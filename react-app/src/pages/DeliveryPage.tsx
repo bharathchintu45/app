@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { supabase } from "../lib/supabase";
 import type { AppUser } from "../types";
-import { Package, MapPin, CheckCircle2, Navigation, X, Lock, Map, Zap, Delete, AlertTriangle, Clock, ShieldOff, ShieldAlert, MessageCircle } from "lucide-react";
+import { Package, MapPin, CheckCircle2, Navigation, X, Zap, Delete, AlertTriangle, ShieldAlert, MessageCircle } from "lucide-react";
 import { Button } from "../components/ui/Button";
 import { cn } from "../lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
@@ -19,13 +19,9 @@ export function DeliveryPage({ user, onBack, showToast }: { user: AppUser | null
   const [otpValue, setOtpValue] = useState("");
   const [verifyingAssignment, setVerifyingAssignment] = useState<any>(null);
   const [isVerifying, setIsVerifying] = useState(false);
-  const [otpError, setOtpError] = useState(false);
   const [deliverySuccess, setDeliverySuccess] = useState(false);
   const otpInputRef = useRef<HTMLInputElement>(null);
 
-  // Override state
-  const [showOverrideConfirm, setShowOverrideConfirm] = useState(false);
-  const [isOverriding, setIsOverriding] = useState(false);
 
   useEffect(() => {
     if (!user) return;
@@ -96,28 +92,15 @@ export function DeliveryPage({ user, onBack, showToast }: { user: AppUser | null
   async function handleDeliverClick(assignment: any) {
     setVerifyingAssignment(assignment);
     setOtpValue("");
-    setOtpError(false);
-    setDeliverySuccess(false);
-    setShowOverrideConfirm(false);
     setOtpModalOpen(true);
     // Focus with a slight delay to ensure modal is rendered
     setTimeout(() => otpInputRef.current?.focus(), 150);
   }
 
-  function closeModal() {
-    if (deliverySuccess) {
-      // Just close after showing success
-      setOtpModalOpen(false);
-      setDeliverySuccess(false);
-    } else {
-      setOtpModalOpen(false);
-    }
-  }
 
   async function confirmDelivery() {
     if (!verifyingAssignment) return;
     setIsVerifying(true);
-    setOtpError(false);
 
     const orderId = verifyingAssignment.order_id;
     const { data: order } = await supabase.from('orders').select('meta').eq('id', orderId).single();
@@ -145,36 +128,11 @@ export function DeliveryPage({ user, onBack, showToast }: { user: AppUser | null
         }, 2500);
       }
     } else {
-      setOtpError(true);
       showToast("❌ Incorrect PIN. Please ask the customer for the correct 4-digit code.");
     }
     setIsVerifying(false);
   }
 
-  async function handleOverride() {
-    if (!verifyingAssignment) return;
-    setIsOverriding(true);
-
-    const orderId = verifyingAssignment.order_id;
-    const { data: order } = await supabase.from('orders').select('meta').eq('id', orderId).single();
-    const currentMeta = order?.meta || {};
-
-    // Mark with override flag
-    await supabase.from('orders').update({ 
-      meta: { ...currentMeta, delivery_override: true, override_at: new Date().toISOString() },
-      status: 'delivered'
-    }).eq('id', orderId);
-
-    const ok = await updateStatusCore(verifyingAssignment.id, 'delivered');
-    if (ok) {
-      setDeliverySuccess(true);
-      setTimeout(() => {
-        setOtpModalOpen(false);
-        setDeliverySuccess(false);
-      }, 2500);
-    }
-    setIsOverriding(false);
-  }
 
   if (loading) {
     return (
@@ -510,7 +468,6 @@ export function DeliveryPage({ user, onBack, showToast }: { user: AppUser | null
         onChange={(e) => {
           const val = e.target.value.replace(/\D/g, '');
           setOtpValue(val);
-          setOtpError(false);
         }}
         className="sr-only"
         autoFocus

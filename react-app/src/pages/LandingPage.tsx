@@ -10,7 +10,8 @@ import { clamp } from "../lib/format";
 import { Sparkles, ArrowRight, UtensilsCrossed, Check, Search, ShoppingBag, Sprout, Users, X, ChevronLeft, ChevronRight } from "lucide-react";
 import { MenuItemModal } from "../components/ui/MenuItemModal";
 import { cn } from "../lib/utils";
-import tfbLogo from "../assets/tfb-logo.png";
+import tfbLogoWebP from "../assets/tfb-logo.webp";
+import tfbLogoPng from "../assets/tfb-logo-opt.png";
 
 // Make sure to add a helper for the Pill component used in the prototype
 function Pill({ children }: { children: React.ReactNode }) {
@@ -245,7 +246,19 @@ export function LandingPage({
       {/* Hero */}
       <div className="pt-2 pb-12 md:pt-4 md:pb-16 text-center">
         <div className="flex justify-center mb-6">
-          <img src={tfbLogo} alt="The Fit Bowls" className="w-32 h-32 md:w-40 md:h-40 object-contain drop-shadow-lg -mt-4 md:-mt-6 scale-[1.2] origin-top" />
+          {/* Use <picture> for WebP with PNG fallback. fetchpriority=high → LCP boost. */}
+          <picture>
+            <source srcSet={tfbLogoWebP} type="image/webp" />
+            <img
+              src={tfbLogoPng}
+              alt="The Fit Bowls"
+              width={160}
+              height={160}
+              fetchPriority="high"
+              decoding="async"
+              className="w-32 h-32 md:w-40 md:h-40 object-contain drop-shadow-lg -mt-4 md:-mt-6 scale-[1.2] origin-top"
+            />
+          </picture>
         </div>
         <div className="flex flex-col items-center gap-3 mb-6">
           <div className="flex items-center gap-2 px-4 py-1.5 rounded-full bg-black/5 text-xs font-medium text-black/60 shadow-sm border border-black/5">

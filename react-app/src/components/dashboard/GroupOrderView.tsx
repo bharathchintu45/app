@@ -3,7 +3,7 @@ import { Card, CardHeader, CardContent } from "../ui/Card";
 import { Input, Textarea } from "../ui/Input";
 import { Button } from "../ui/Button";
 import { SectionTitle } from "../ui/Typography";
-import { UtensilsCrossed, ArrowRight, Search, ShoppingBag, X, ChevronRight, Minus, Plus } from "lucide-react";
+import { UtensilsCrossed, ArrowRight, Search, ShoppingBag, X, Minus, Plus } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAppSetting, useAppSettingNumber, useAppSettingString } from "../../hooks/useAppSettings";
 import { clamp, digitsOnly, formatDateIndia, dayKey } from "../../lib/format";

@@ -1107,6 +1107,7 @@ export function CheckoutGroupPage({
   const [payError, setPayError] = useState("");
   const { openPayment, loading: payLoading } = useRazorpay();
   const [isPickup, setIsPickup] = useState(false);
+  const [orderStatus, setOrderStatus] = useState<"success" | "failure" | "none">("none");
 
   const storeOpenWeekday = useAppSettingString("store_open_weekday", "06:00");
   const storeCloseWeekday = useAppSettingString("store_close_weekday", "21:00");
