@@ -192,8 +192,6 @@ export function UserSettingsPage({
 
   if (!user) { setRoute("home"); return null; }
 
-  const totalOrders = orders.length;
-  const totalSpent = orders.reduce((s, o) => s + (o.priceSummary?.total || 0), 0);
   const proPoints = orders.length * 15;
   const streak = (() => {
     const orderDays = new Set(orders.map(o => {
@@ -268,29 +266,8 @@ export function UserSettingsPage({
             )}
           </div>
 
-          {/* Total spent */}
-          {totalSpent > 0 && (
-            <div className="hidden sm:block text-right shrink-0">
-              <div className="text-2xl font-black">₹{totalSpent.toLocaleString("en-IN")}</div>
-              <div className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mt-1">Lifetime Spent</div>
-            </div>
-          )}
         </div>
 
-        {/* Stats row */}
-        <div className="relative z-10 mt-5 grid grid-cols-4 gap-2">
-          {[
-            { label: "Orders",    value: totalOrders,         color: "text-sky-400" },
-            { label: "Points",    value: proPoints,           color: "text-amber-400" },
-            { label: "Streak",    value: `${streak}🔥`,      color: "text-rose-400" },
-            { label: "Days Left", value: daysLeft || "—",     color: "text-emerald-400" },
-          ].map(s => (
-            <div key={s.label} className="bg-white/5 border border-white/8 rounded-2xl p-3 text-center">
-              <div className={cn("text-xl font-black", s.color)}>{s.value}</div>
-              <div className="text-[9px] font-bold text-slate-500 uppercase tracking-widest mt-0.5">{s.label}</div>
-            </div>
-          ))}
-        </div>
       </div>
 
       {/* ── TAB BAR ── */}

@@ -43,17 +43,22 @@ class ErrorBoundary extends React.Component<{children: React.ReactNode}, {hasErr
   }
 }
 
-// Pages
-import { LandingPage } from "./pages/LandingPage";
+// Pages (Lazy Loaded for performance)
+const LandingPage = React.lazy(() => import("./pages/LandingPage").then(module => ({ default: module.LandingPage })));
+const DashboardPage = React.lazy(() => import("./pages/DashboardPage").then(module => ({ default: module.DashboardPage })));
+const KitchenPage = React.lazy(() => import("./pages/KitchenPage").then(module => ({ default: module.KitchenPage })));
+const AdminPage = React.lazy(() => import("./pages/AdminPage").then(module => ({ default: module.AdminPage })));
+const CheckoutRegularPage = React.lazy(() => import("./pages/CheckoutPages").then(module => ({ default: module.CheckoutRegularPage })));
+const CheckoutPersonalPage = React.lazy(() => import("./pages/CheckoutPages").then(module => ({ default: module.CheckoutPersonalPage })));
+const CheckoutGroupPage = React.lazy(() => import("./pages/CheckoutPages").then(module => ({ default: module.CheckoutGroupPage })));
+const OrderConfirmationPage = React.lazy(() => import("./pages/CheckoutPages").then(module => ({ default: module.OrderConfirmationPage })));
+const UserSettingsPage = React.lazy(() => import("./pages/UserSettingsPage").then(module => ({ default: module.UserSettingsPage })));
+const OrderTrackingPage = React.lazy(() => import("./pages/OrderTrackingPage").then(module => ({ default: module.OrderTrackingPage })));
+const DeliveryPage = React.lazy(() => import("./pages/DeliveryPage").then(module => ({ default: module.DeliveryPage })));
+const NotFoundPage = React.lazy(() => import("./pages/NotFoundPage").then(module => ({ default: module.NotFoundPage })));
+
+// MaintenancePage remains eager as it is a fallback
 import { MaintenancePage } from "./pages/MaintenancePage";
-import { DashboardPage } from "./pages/DashboardPage";
-import { KitchenPage } from "./pages/KitchenPage";
-import { AdminPage } from "./pages/AdminPage";
-import { CheckoutRegularPage, CheckoutPersonalPage, CheckoutGroupPage, OrderConfirmationPage } from "./pages/CheckoutPages";
-import { UserSettingsPage } from "./pages/UserSettingsPage";
-import { OrderTrackingPage } from "./pages/OrderTrackingPage";
-import { DeliveryPage } from "./pages/DeliveryPage";
-import { NotFoundPage } from "./pages/NotFoundPage";
 
 // Components
 import { OfflineOverlay } from "./components/layout/OfflineOverlay";
@@ -509,12 +514,21 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-white">
-      <ErrorBoundary>
-        {isMaintenance && !isAuthorized ? (
-          <MaintenancePage />
-        ) : (
-          <>
+    <ErrorBoundary>
+      <React.Suspense fallback={
+        <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center p-8 text-white space-y-6">
+          <div className="w-16 h-16 border-4 border-emerald-500/30 border-t-emerald-500 rounded-full animate-spin" />
+          <div className="space-y-2 text-center">
+            <h2 className="text-xl font-black tracking-tight">The Fit Bowls</h2>
+            <p className="text-slate-400 text-sm font-medium animate-pulse">Loading your premium experience...</p>
+          </div>
+        </div>
+      }>
+        <div className="min-h-screen bg-white">
+          {isMaintenance && !isAuthorized ? (
+            <MaintenancePage />
+          ) : (
+            <>
             <TopNav
               route={route}
               setRoute={changeRoute}
@@ -663,7 +677,6 @@ export default function App() {
             </main>
           </>
         )}
-      </ErrorBoundary>
 
       <AuthModal
         isOpen={authOpen}
@@ -687,6 +700,8 @@ export default function App() {
       </AnimatePresence>
 
       <OfflineOverlay isOffline={isOffline} />
-    </div>
+          </div>
+      </React.Suspense>
+    </ErrorBoundary>
   );
 }
