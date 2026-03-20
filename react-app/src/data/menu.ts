@@ -6,7 +6,9 @@ export const PLAN_TYPES: { key: PlanType; title: string; slots: import("../types
   { key: "breakfast", title: "Breakfast only", slots: ["Slot1"] },
   { key: "lunch", title: "Lunch only", slots: ["Slot2"] },
   { key: "dinner", title: "Dinner only", slots: ["Slot3"] },
+  { key: "breakfast-lunch", title: "Breakfast & Lunch", slots: ["Slot1", "Slot2"] },
   { key: "lunch-dinner", title: "Lunch & Dinner", slots: ["Slot2", "Slot3"] },
+  { key: "breakfast-dinner", title: "Breakfast & Dinner", slots: ["Slot1", "Slot3"] },
   { key: "complete", title: "All 3 meals", slots: ["Slot1", "Slot2", "Slot3"] },
 ];
 
@@ -19,7 +21,13 @@ export function subscriptionId(type: string, duration: number) {
 export function parseSubscriptionId(id: string): { type: PlanType; duration: Duration } {
   const fallback = { type: "complete" as PlanType, duration: 7 as Duration };
   if (!id || typeof id !== "string") return fallback;
-  const [t, d] = id.split("-");
+  
+  const lastDash = id.lastIndexOf("-");
+  if (lastDash === -1) return fallback;
+  
+  const t = id.substring(0, lastDash);
+  const d = id.substring(lastDash + 1);
+  
   if (!t || !d) return fallback;
   const num = parseInt(d, 10);
   const dur = [7, 15, 30].includes(num) ? (num as Duration) : fallback.duration;

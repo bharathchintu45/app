@@ -3,7 +3,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import type { AppUser, Route, AuthIntent, DashboardTab, Cat, MenuItem } from "../types";
 import { CATS, DURATIONS, PLAN_TYPES, buildPlanFromSubscription, subscriptionId } from "../data/menu";
 import { useMenu } from "../hooks/useMenu";
-import { useAppSetting, useAppSettingNumber } from "../hooks/useAppSettings";
+import { useAppSetting, useAppSettingNumber, useAppSettingString } from "../hooks/useAppSettings";
 import { Button } from "../components/ui/Button";
 import { Input } from "../components/ui/Input";
 import { clamp } from "../lib/format";
@@ -51,6 +51,7 @@ export function LandingPage({
   const [regularSearch, setRegularSearch] = useState("");
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
   const [modalItem, setModalItem] = useState<MenuItem | null>(null);
+  const [isCartDrawerOpen, setIsCartDrawerOpen] = useState(false);
   
   // Local state for active section (replicated from prototype's App)
   const [activeSection, setActiveSection] = useState<"regular" | "personalized" | "group">("personalized");
@@ -59,6 +60,71 @@ export function LandingPage({
   const enableRegularOrders = useAppSetting("enable_regular_orders", true);
   const enablePersonalizedSubscriptions = useAppSetting("enable_personalized_subscriptions", true);
   const enableGroupMeals = useAppSetting("enable_group_meals", true);
+
+  const enableStoreTimings = useAppSetting("enable_store_timings", true);
+
+  const storeOpenWeekday = useAppSettingString("store_open_weekday", "06:00");
+  const storeCloseWeekday = useAppSettingString("store_close_weekday", "21:00");
+  const storeOpenWeekend = useAppSettingString("store_open_weekend", "09:00");
+  const storeCloseWeekend = useAppSettingString("store_close_weekend", "21:00");
+
+  const storeStatus = useMemo(() => {
+    const now = new Date();
+    const hours = now.getHours();
+    const minutes = now.getMinutes();
+    const currentTime = hours * 60 + minutes;
+    const day = now.getDay();
+    const isWeekend = day === 0 || day === 6;
+
+    const openStr = isWeekend ? storeOpenWeekend.value : storeOpenWeekday.value;
+    const closeStr = isWeekend ? storeCloseWeekend.value : storeCloseWeekday.value;
+
+    const [openH, openM] = openStr.split(':').map(Number);
+    const [closeH, closeM] = closeStr.split(':').map(Number);
+
+    const openTime = openH * 60 + openM;
+    const closeTime = closeH * 60 + closeM;
+
+    // Correctly handle midnight rollovers (e.g., 9 AM to 1 AM)
+    let isOpenWithinHours = false;
+    if (closeTime < openTime) {
+      isOpenWithinHours = currentTime >= openTime || currentTime < closeTime;
+    } else {
+      isOpenWithinHours = currentTime >= openTime && currentTime < closeTime;
+    }
+
+    // Admin override
+    const isOpen = !enableStoreTimings.value || isOpenWithinHours;
+    
+    // Determine next opening label
+    let nextOpeningPrefix = "today";
+    let nextOpeningTimeStr = openStr;
+
+    // If currently CLOSED (within the restricted time window)
+    if (!isOpenWithinHours) {
+      // If we are AFTER closing time (or before opening if not a rollover)
+      // For rollover: if closeTime < openTime, then "after closing" is between closeTime and openTime
+      // For non-rollover: "after closing" is either before openTime or after closeTime
+      
+      const isAfterClosing = closeTime < openTime
+        ? (currentTime >= closeTime && currentTime < openTime)
+        : (currentTime >= closeTime || currentTime < openTime);
+
+      if (isAfterClosing) {
+        nextOpeningPrefix = "tomorrow";
+        const nextDayIsWeekend = (day + 1) % 7 === 0 || (day + 1) % 7 === 6;
+        nextOpeningTimeStr = nextDayIsWeekend ? storeOpenWeekend.value : storeOpenWeekday.value;
+      }
+    }
+
+    return {
+      isOpen,
+      todayHours: `${openStr} - ${closeStr}`,
+      nextOpeningTime: nextOpeningTimeStr,
+      nextOpeningPrefix,
+      isWeekend
+    };
+  }, [storeOpenWeekday.value, storeCloseWeekday.value, storeOpenWeekend.value, storeCloseWeekend.value, enableStoreTimings.value]);
 
   // Fallback if current active section is disabled
   useEffect(() => {
@@ -115,6 +181,27 @@ export function LandingPage({
     });
   }
 
+  // Handle back button to close drawer
+  useEffect(() => {
+    if (isCartDrawerOpen) {
+      window.history.pushState({ cartOpen: true }, "");
+      const handlePop = () => setIsCartDrawerOpen(false);
+      window.addEventListener("popstate", handlePop);
+      return () => window.removeEventListener("popstate", handlePop);
+    }
+  }, [isCartDrawerOpen]);
+
+  const subtotal = regularCartItems.reduce((acc, {item, qty}) => acc + (item.priceINR || 0) * qty, 0);
+  const totalUnits = regularCartItems.reduce((a, c) => a + c.qty, 0);
+
+  // Auto-clear cart if store closes while user has items
+  useEffect(() => {
+    if (activeSection === "regular" && !storeStatus.isOpen && regularCartItems.length > 0) {
+      setRegularCart({});
+      showToast("Store timings ended. Regular order checkout is currently unavailable.");
+    }
+  }, [activeSection, storeStatus.isOpen, regularCartItems.length, setRegularCart, showToast]);
+
   function goPersonalized() {
     if (!subscription) {
       showToast("Please select a duration and meal type before opening the meal planner.");
@@ -160,14 +247,16 @@ export function LandingPage({
         <div className="flex justify-center mb-6">
           <img src={tfbLogo} alt="The Fit Bowls" className="w-32 h-32 md:w-40 md:h-40 object-contain drop-shadow-lg -mt-4 md:-mt-6 scale-[1.2] origin-top" />
         </div>
-        <div className="inline-flex items-center rounded-full bg-black/5 px-4 py-1.5 text-xs font-medium text-black/60 mb-4">
-          ✨ Macro-first healthy meals, delivered
+        <div className="flex flex-col items-center gap-3 mb-6">
+          <div className="flex items-center gap-2 px-4 py-1.5 rounded-full bg-black/5 text-xs font-medium text-black/60 shadow-sm border border-black/5">
+            ✨ Macro-first healthy meals, delivered
+          </div>
         </div>
         <h1 className="text-3xl md:text-4xl font-bold tracking-tight">
-          The Fit Bowls<br />
+          THE FIT BOWL<br />
           <span className="text-black/50">Eat smart. Track macros. Stay on plan.</span>
         </h1>
-        <p className="mt-4 text-black/55 max-w-xl mx-auto">
+    <p className="mt-4 text-black/55 max-w-xl mx-auto">
           Subscription meal plans with full macro tracking, one-time orders, and group catering — all from one place.
         </p>
       </div>
@@ -433,8 +522,24 @@ export function LandingPage({
       {/* ─── REGULAR ORDERS SECTION ─── */}
       {activeSection === "regular" && (
         <div className="space-y-6 animate-fade-in">
+          {!storeStatus.isOpen && (
+            <div className="rounded-2xl border border-rose-200 bg-rose-50 p-6 flex items-start gap-4 shadow-sm">
+              <div className="w-12 h-12 rounded-2xl bg-rose-100 flex items-center justify-center shrink-0">
+                <X size={24} className="text-rose-600" />
+              </div>
+              <div>
+                <h3 className="text-lg font-black text-rose-900">Store Timings Ended</h3>
+                <p className="text-rose-700 font-medium">
+                  We are currently closed for the day. Please check back at <span className="font-black underline">{storeStatus.nextOpeningTime} {storeStatus.nextOpeningPrefix}</span>.
+                </p>
+                <div className="mt-3 flex items-center gap-2 text-xs font-bold text-rose-500 uppercase tracking-widest">
+                  <span>Operating Hours: {storeStatus.todayHours}</span>
+                </div>
+              </div>
+            </div>
+          )}
           {/* Menu browser */}
-          <div className="rounded-2xl border border-slate-100 bg-white shadow-sm overflow-hidden">
+          <div className={cn("rounded-2xl border border-slate-100 bg-white shadow-sm overflow-hidden transition-all", !storeStatus.isOpen && "opacity-60 grayscale-[0.5] pointer-events-none")}>
              <div className="p-6 border-b border-black/5 flex items-center gap-3">
               <div className="w-10 h-10 rounded-xl bg-black/5 flex items-center justify-center">
                 <UtensilsCrossed size={20} className="text-black/70" />
@@ -562,105 +667,159 @@ export function LandingPage({
                   );
                 })}
               </div>
-              </div>
             </div>
           </div>
+        </div>
 
       {/* Sticky Floating Cart/Checkout Bar */}
       <AnimatePresence>
-        {regularCartItems.length > 0 && (
+        {totalUnits > 0 && (activeSection !== "regular" || storeStatus.isOpen) && (
           <motion.div 
             initial={{ y: 100, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
             exit={{ y: 100, opacity: 0 }}
-            transition={{ type: "spring", stiffness: 260, damping: 20 }}
+            transition={{ type: "spring", stiffness: 260, damping: 25 }}
             className="fixed bottom-6 left-0 right-0 z-50 px-4 sm:px-6 pointer-events-none"
           >
             <div className="mx-auto max-w-4xl w-full pointer-events-auto">
-              <div className="rounded-3xl border border-white/20 bg-white/80 shadow-[0_20px_50px_-20px_rgba(0,0,0,0.3)] backdrop-blur-xl overflow-hidden">
-                <div className="p-4 sm:p-5 flex flex-col sm:flex-row items-center justify-between gap-4">
-                  <div className="flex-1 w-full flex items-center justify-between sm:justify-start gap-6">
-                    <div>
-                      <div className="font-bold text-slate-900 flex items-center gap-2">
-                        <ShoppingBag size={18} className="text-emerald-600" />
-                        Your Order
-                        <span className="bg-emerald-500/10 text-emerald-700 text-[10px] font-black uppercase tracking-widest px-2.5 py-1 rounded-full border border-emerald-500/20">
-                          {regularCartItems.reduce((a, c) => a + c.qty, 0)} Items
+              <div 
+                onClick={() => setIsCartDrawerOpen(true)}
+                className="group cursor-pointer rounded-[2rem] border border-white/40 bg-white shadow-[0_30px_60px_-15px_rgba(0,0,0,0.25)] backdrop-blur-2xl overflow-hidden ring-1 ring-black/5"
+              >
+                <div className="p-2 sm:p-4 flex items-center justify-between gap-2 sm:gap-4">
+                  <div className="flex items-center gap-3 sm:gap-4 flex-1 min-w-0">
+                    <div className="flex flex-col">
+                      <div className="flex items-center gap-2 mb-0.5">
+                        <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-emerald-500/10 flex items-center justify-center shrink-0">
+                          <ShoppingBag size={14} className="text-emerald-600 sm:w-4 sm:h-4" />
+                        </div>
+                        <span className="font-black text-slate-900 text-[13px] sm:text-sm tracking-tight truncate">Your Order</span>
+                        <span className="bg-emerald-500 text-white text-[9px] sm:text-[10px] font-black px-1.5 py-0.5 rounded-full shadow-sm shrink-0">
+                          {totalUnits}
                         </span>
                       </div>
-                      <div className="hidden sm:flex items-center gap-1 mt-1.5 group/scrollnav">
-                        <button 
-                          onClick={() => {
-                            const el = document.getElementById('cart-items-list');
-                            if (el) el.scrollBy({ left: -200, behavior: 'smooth' });
-                          }}
-                          className="p-1 hover:bg-slate-100 rounded-full text-slate-400 hover:text-slate-600 transition-colors shrink-0"
-                        >
-                          <ChevronLeft size={16} />
-                        </button>
-                        
-                        <div 
-                          id="cart-items-list"
-                          className="flex gap-2 overflow-x-auto no-scrollbar max-w-md py-1 scroll-smooth"
-                        >
-                          {regularCartItems.map(({ item, qty }) => (
-                            <div 
-                              key={item.id} 
-                              className="group flex items-center gap-1.5 whitespace-nowrap bg-slate-100/50 hover:bg-slate-100 px-2 py-1.5 rounded-xl border border-slate-200/50 transition-all cursor-default scale-100 hover:scale-[1.02]"
-                            >
-                              <span className="text-[10px] font-bold text-slate-500">{qty}×</span>
-                              <span className="text-[11px] font-semibold text-slate-700 truncate max-w-[80px]">{item.name}</span>
-                              <button 
-                                onClick={(e) => { e.stopPropagation(); addToCart(item, -qty); }}
-                                className="opacity-0 group-hover:opacity-100 ml-1 p-0.5 rounded-full hover:bg-red-50 text-red-400 hover:text-red-600 transition-all"
-                                title="Remove item"
-                              >
-                                <X size={12} />
-                              </button>
-                            </div>
-                          ))}
-                        </div>
-
-                        <button 
-                          onClick={() => {
-                            const el = document.getElementById('cart-items-list');
-                            if (el) el.scrollBy({ left: 200, behavior: 'smooth' });
-                          }}
-                          className="p-1 hover:bg-slate-100 rounded-full text-slate-400 hover:text-slate-600 transition-colors shrink-0"
-                        >
-                          <ChevronRight size={16} />
-                        </button>
+                      
+                      <div className="hidden md:flex items-center gap-1.5 overflow-hidden">
+                        {regularCartItems.slice(0, 3).map(({ item, qty }) => (
+                          <div key={item.id} className="flex items-center gap-1 bg-slate-50 border border-slate-100 px-2 py-1 rounded-full shrink-0">
+                            <span className="text-[10px] font-bold text-emerald-600">{qty}×</span>
+                            <span className="text-[11px] font-bold text-slate-600 truncate max-w-[60px]">{item.name}</span>
+                          </div>
+                        ))}
                       </div>
-                    </div>
-
-                    <div className="sm:hidden text-right">
-                       <div className="text-[10px] font-black uppercase tracking-widest text-slate-400 leading-none mb-1">Total</div>
-                       <div className="text-2xl font-black text-slate-900 leading-none">
-                         ₹{regularCartItems.reduce((acc, {item, qty}) => acc + (item.priceINR || 0) * qty, 0)}
-                       </div>
                     </div>
                   </div>
 
-                  <div className="w-full sm:w-auto shrink-0 flex flex-col items-end gap-3">
-                    <div className="hidden sm:block text-right">
-                       <div className="text-[10px] font-black uppercase tracking-widest text-slate-400 leading-none mb-1">Total Amount</div>
-                       <div className="text-2xl font-black text-slate-900 leading-none">
-                         ₹{regularCartItems.reduce((acc, {item, qty}) => acc + (item.priceINR || 0) * qty, 0)}
-                       </div>
+                  <div className="flex items-center gap-3 sm:gap-6">
+                    <div className="text-right shrink-0">
+                       <div className="hidden sm:block text-[10px] font-black uppercase tracking-widest text-slate-400 mb-0.5">Total Amount</div>
+                       <div className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">₹{subtotal}</div>
                     </div>
+                    
                     <Button 
-                      onClick={goCheckout} 
+                      onClick={(e) => { e.stopPropagation(); setIsCartDrawerOpen(true); }} 
                       size="lg" 
-                      className="w-full sm:px-10 h-14 rounded-2xl bg-slate-900 text-white hover:bg-black transition-all shadow-xl shadow-slate-900/20 text-base font-bold flex items-center justify-center gap-2 group"
+                      className="h-11 sm:h-14 px-5 sm:px-10 rounded-full bg-slate-950 text-white hover:bg-black transition-all shadow-xl shadow-slate-950/20 text-xs sm:text-sm font-black flex items-center gap-2 group"
                     >
-                      Checkout Now 
-                      <ArrowRight className="h-5 w-5 group-hover:translate-x-1 transition-transform" />
+                      View Cart
+                      <ArrowRight className="h-4 w-4 sm:h-5 sm:w-5 group-hover:translate-x-1 transition-transform" />
                     </Button>
                   </div>
                 </div>
               </div>
             </div>
           </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Cart Drawer Overlay */}
+      <AnimatePresence>
+        {isCartDrawerOpen && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsCartDrawerOpen(false)}
+              className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[60]"
+            />
+            <motion.div
+              initial={{ x: "100%" }}
+              animate={{ x: 0 }}
+              exit={{ x: "100%" }}
+              transition={{ type: "spring", damping: 30, stiffness: 300 }}
+              className="fixed top-0 right-0 bottom-0 w-full sm:w-[450px] bg-white z-[70] shadow-2xl flex flex-col"
+            >
+              {/* Header */}
+              <div className="p-6 border-b border-slate-100 flex items-center justify-between">
+                <div>
+                  <h2 className="text-2xl font-black text-slate-900">Your Cart</h2>
+                  <p className="text-sm text-slate-500 font-medium">Review items and checkout</p>
+                </div>
+                <button 
+                  onClick={() => setIsCartDrawerOpen(false)}
+                  className="w-10 h-10 rounded-full bg-slate-50 flex items-center justify-center text-slate-400 hover:text-slate-900 transition-colors"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+
+              {/* Items List */}
+              <div className="flex-1 overflow-y-auto p-6 space-y-4">
+                {regularCartItems.map(({ item, qty }) => (
+                  <div key={item.id} className="flex items-center gap-4 bg-slate-50 p-4 rounded-2xl border border-slate-100 group">
+                    <img src={getItemImage(item)} alt={item.name} className="w-16 h-16 rounded-xl object-cover shadow-sm" />
+                    <div className="flex-1 min-w-0">
+                      <h4 className="font-bold text-slate-900 truncate">{item.name}</h4>
+                      <div className="text-xs text-slate-500 font-medium mt-0.5">₹{item.priceINR} / unit</div>
+                      <div className="flex items-center gap-3 mt-2">
+                        <div className="flex items-center gap-3 bg-white border border-slate-200 rounded-lg p-1">
+                          <button onClick={() => addToCart(item, -1)} className="w-6 h-6 flex items-center justify-center hover:bg-slate-50 rounded text-slate-500">
+                            <ChevronLeft size={14} />
+                          </button>
+                          <span className="text-xs font-black min-w-[12px] text-center">{qty}</span>
+                          <button onClick={() => addToCart(item, 1)} className="w-6 h-6 flex items-center justify-center hover:bg-slate-50 rounded text-slate-500">
+                            <ChevronRight size={14} />
+                          </button>
+                        </div>
+                        <button 
+                          onClick={() => addToCart(item, -qty)}
+                          className="text-[10px] font-black uppercase tracking-widest text-rose-500 hover:text-rose-600 transition-colors"
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    </div>
+                    <div className="text-right font-black text-slate-900">
+                      ₹{(item.priceINR || 0) * qty}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Footer */}
+              <div className="p-6 bg-slate-50 border-t border-slate-100 space-y-4">
+                <div className="space-y-2">
+                  <div className="flex justify-between text-sm text-slate-500 font-bold">
+                    <span>Subtotal</span>
+                    <span>₹{subtotal}</span>
+                  </div>
+                  <div className="flex justify-between text-2xl font-black text-slate-900 pt-2 border-t border-slate-200">
+                    <span>Total</span>
+                    <span>₹{subtotal}</span>
+                  </div>
+                </div>
+                <Button 
+                  onClick={goCheckout}
+                  size="lg" 
+                  className="w-full h-16 rounded-2xl bg-slate-950 text-white hover:bg-black shadow-xl shadow-slate-950/20 text-lg font-black flex items-center justify-center gap-3 group"
+                >
+                  Confirm Checkout
+                  <ArrowRight className="group-hover:translate-x-1 transition-transform" />
+                </Button>
+              </div>
+            </motion.div>
+          </>
         )}
       </AnimatePresence>
         </div>
@@ -671,9 +830,9 @@ export function LandingPage({
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-2">
             <span className="w-5 h-5 rounded-md bg-black/10 flex items-center justify-center text-[10px] text-black">TF</span>
-            © {new Date().getFullYear()} The Fit Bowls • Macro-first healthy meals
+            © {new Date().getFullYear()} THE FIT BOWL • Macro-first healthy meals
           </div>
-          <div className="flex gap-4 items-center">
+      <div className="flex gap-4 items-center">
             <button className="hover:text-black transition-colors">Privacy</button>
             <span className="w-1 h-1 rounded-full bg-black/20"></span>
             <button className="hover:text-black transition-colors">Terms</button>

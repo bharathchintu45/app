@@ -6,48 +6,87 @@ import { Printer, X, Eye } from "lucide-react";
 export function buildSingleLabelHtml(order: OrderReceipt): string {
   const fmtDate = (ts: number) => {
     const d = new Date(ts);
-    return d.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: '2-digit', hour: 'numeric', minute: '2-digit', hour12: true });
+    return d.toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: '2-digit', year: 'numeric' });
+  };
+  const fmtTime = (ts: number) => {
+    const d = new Date(ts);
+    return d.toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: 'numeric', minute: '2-digit', hour12: true });
   };
 
-  const totalQty = order.lines?.reduce((s, l) => s + l.qty, 0) || 0;
+  const isPaid = order.payment?.toLowerCase().includes('paid');
   const itemsHtml = (order.lines || []).map(l =>
-    `<tr><td style="font-weight:900;font-size:13px;padding:2px 4px 2px 0">x${l.qty}</td><td style="text-transform:uppercase;font-weight:700;padding:2px 0">${l.label}</td></tr>`
+    `<tr style="vertical-align:top;border-bottom:1px dashed #eee">
+      <td style="padding:4px 0">
+        <div style="display:flex;gap:4px">
+          <span style="font-weight:900;font-size:12px">x${l.qty}</span>
+          <span style="font-weight:700;text-transform:uppercase;font-size:10px">${l.label}</span>
+        </div>
+      </td>
+      <td style="text-align:right;font-weight:700;padding:4px 0;font-size:10px">
+        ${l.unitPriceAtOrder ? `₹${l.unitPriceAtOrder * l.qty}` : '—'}
+      </td>
+    </tr>`
   ).join('');
 
   return `
-    <div style="page-break-after:always;font-family:'Courier New',monospace;font-size:10px;width:72mm;margin:0 auto;padding:4mm 2mm;color:#000">
-      <div style="text-align:center;margin-bottom:6px">
-        <div style="font-size:14px;font-weight:900;letter-spacing:-0.5px">THE FIT BOWL</div>
-        <div style="font-size:7px;text-transform:uppercase;letter-spacing:3px;border-bottom:1px solid #000;padding-bottom:4px">Precision Nutrition</div>
+    <div style="page-break-after:always;font-family:'Courier New',monospace;font-size:10px;width:72mm;margin:0 auto;padding:4mm 2mm;color:#000;line-height:1.2">
+      <div style="text-align:center;margin-bottom:4px">
+        <div style="font-size:16px;font-weight:900;letter-spacing:-0.5px">THE FIT BOWL</div>
+        <div style="font-size:7px;font-weight:700;text-transform:uppercase;letter-spacing:3px;border-bottom:1px solid #000;padding-bottom:4px;margin-bottom:4px">Precision Nutrition</div>
       </div>
-      <div style="display:flex;justify-content:space-between;align-items:center;background:#000;color:#fff;padding:3px 6px;margin-bottom:4px">
+      <div style="display:flex;justify-content:space-between;align-items:center;background:#000;color:#fff;padding:4px 8px;margin-bottom:4px">
         <span style="font-weight:900;font-size:13px">#${order.orderNumber || order.id.slice(0,6).toUpperCase()}</span>
         <span style="font-weight:900;font-size:9px;text-transform:uppercase">${order.payment || 'COD'}</span>
       </div>
-      <div style="display:flex;justify-content:space-between;font-size:8px;font-weight:700;border-bottom:1px solid #ddd;padding-bottom:3px;margin-bottom:4px">
-        <span style="text-transform:uppercase">${order.kind} Order</span>
-        <span>${fmtDate(order.createdAt)}</span>
+      <div style="display:flex;justify-content:space-between;font-size:8px;font-weight:700;border-bottom:1px solid #eee;padding-bottom:3px;margin-bottom:4px">
+        <span style="text-transform:uppercase">${order.kind} | ${order.deliveryAtLabel}</span>
+        <span>${fmtDate(order.createdAt)} ${fmtTime(order.createdAt)}</span>
       </div>
-      <div style="margin-bottom:6px;padding-bottom:4px;border-bottom:1px solid #000">
+      <div style="margin-bottom:8px;padding-bottom:4px;border-bottom:1px solid #000">
         <div style="font-weight:900;font-size:13px;text-transform:uppercase">${order.customer?.receiverName || ''}</div>
-        <div style="font-weight:900;border:1px solid #000;display:inline-block;padding:1px 4px;margin:2px 0">PH: ${order.customer?.receiverPhone || ''}</div>
-        <div style="margin-top:4px;font-weight:700">
+        <div style="font-weight:900;border:1px solid #000;display:inline-block;padding:2px 6px;margin:4px 0;font-size:11px">PH: ${order.customer?.receiverPhone || ''}</div>
+        <div style="margin-top:4px;font-weight:700;font-size:9px">
           <span style="background:#000;color:#fff;padding:1px 4px;margin-right:4px;font-size:7px;text-transform:uppercase">${order.customer?.locationType || 'Home'}</span>
           ${order.customer?.building || ''}, ${order.customer?.area || ''}
         </div>
-        ${order.customer?.instructions ? `<div style="margin-top:4px;padding:3px 6px;border-left:3px solid #000;background:#f8f8f8;font-weight:900;font-style:italic">NOTE: ${order.customer.instructions}</div>` : ''}
+        ${order.customer?.instructions ? `<div style="margin-top:4px;padding:4px 6px;border-left:3px solid #000;background:#f8f8f8;font-weight:900;font-style:italic;font-size:9px">NOTE: ${order.customer.instructions}</div>` : ''}
       </div>
-      <div style="margin-bottom:6px">
-        <div style="font-size:7px;font-weight:900;text-transform:uppercase;border-bottom:1px solid #eee;margin-bottom:4px">Qty | Item Description</div>
-        <table style="width:100%;border-collapse:collapse">${itemsHtml}</table>
-        <div style="display:flex;justify-content:space-between;font-weight:900;border-top:1px solid #000;padding-top:3px;margin-top:4px;font-size:9px">
-          <span>TOTAL QUANTITY</span>
-          <span>${totalQty}</span>
+      <div style="margin-bottom:8px">
+        <table style="width:100%;border-collapse:collapse">
+          <thead>
+            <tr style="border-bottom:1px solid #000;font-size:7px;font-weight:900;text-transform:uppercase">
+              <th style="text-align:left;padding-bottom:2px">Qty | Item</th>
+              <th style="text-align:right;padding-bottom:2px">Price</th>
+            </tr>
+          </thead>
+          <tbody>${itemsHtml}</tbody>
+        </table>
+      </div>
+      ${order.priceSummary ? `
+        <div style="border-top:1px solid #000;padding-top:4px;margin-top:4px">
+          <div style="display:flex;justify-content:space-between;font-weight:700;font-size:8px;margin-bottom:2px">
+            <span>SUBTOTAL</span>
+            <span>₹${order.priceSummary.subtotal || order.priceSummary.discountedSubtotal}</span>
+          </div>
+          ${order.priceSummary.gst > 0 ? `
+          <div style="display:flex;justify-content:space-between;font-weight:700;font-size:8px;margin-bottom:2px">
+            <span>GST (5%)</span>
+            <span>₹${order.priceSummary.gst}</span>
+          </div>` : ''}
+          <div style="display:flex;justify-content:space-between;font-weight:700;font-size:8px;margin-bottom:2px">
+            <span>DELIVERY FEE</span>
+            <span>${order.priceSummary.deliveryFee > 0 ? `₹${order.priceSummary.deliveryFee}` : 'FREE'}</span>
+          </div>
+          <div style="display:flex;justify-content:space-between;align-items:center;background:#000;color:#fff;padding:4px 8px;margin-top:4px;font-weight:900">
+            <span style="font-size:9px;text-transform:uppercase">Amount ${isPaid ? 'Paid' : 'To Pay'}</span>
+            <span style="font-size:14px">₹${order.priceSummary.total}</span>
+          </div>
         </div>
-      </div>
-      <div style="text-align:center;border-top:1px dashed #ccc;padding-top:6px;margin-top:6px">
-        <div style="font-size:7px;font-weight:700;letter-spacing:2px;text-transform:uppercase">Eat Clean \u2022 Feel Great</div>
-        <div style="font-size:6px;margin-top:2px;opacity:0.5">Precision delivery by The Fit Bowl</div>
+      ` : ''}
+      <div style="text-align:center;border-top:1px dashed #ccc;padding-top:8px;margin-top:8px">
+        <div style="font-size:9px;font-weight:900;letter-spacing:2px;text-transform:uppercase">Eat Clean \u2022 Feel Great</div>
+        <div style="font-size:7px;margin-top:2px;font-weight:700">Support: +91 85009 29080</div>
+        <div style="font-size:6px;margin-top:4px;opacity:0.5;text-transform:uppercase;font-weight:700">Precision delivery by THE FIT BOWL</div>
       </div>
     </div>`;
 }

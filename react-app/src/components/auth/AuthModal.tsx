@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  X, Sparkles, User, Mail,
+  X, Sparkles, User, Mail, Phone,
   ShieldCheck, ArrowRight, ChefHat, Lock
 } from "lucide-react";
 import { Button } from "../ui/Button";
@@ -51,6 +51,8 @@ export function AuthModal({
 
   // ── State ─────────────────────────────────────────────────────────────────
   const [email,       setEmail]       = useState("");
+  const [phone,       setPhone]       = useState("");
+  const [authMethod,  setAuthMethod]  = useState<"email" | "phone">("email");
   const [password,    setPassword]    = useState("");
   const [name,        setName]        = useState("");
   const [step,        setStep]        = useState<Step>("email");
@@ -96,6 +98,27 @@ export function AuthModal({
       setResendTimer(0);
       if (timerRef.current) clearInterval(timerRef.current);
     }
+  }, [isOpen]);
+
+  // Body scroll lock
+  useEffect(() => {
+    if (isOpen) {
+      document.body.style.overflow = "hidden";
+      document.body.style.height = "100vh";
+      document.documentElement.style.overflow = "hidden";
+      document.documentElement.style.height = "100vh";
+    } else {
+      document.body.style.overflow = "";
+      document.body.style.height = "";
+      document.documentElement.style.overflow = "";
+      document.documentElement.style.height = "";
+    }
+    return () => {
+      document.body.style.overflow = "";
+      document.body.style.height = "";
+      document.documentElement.style.overflow = "";
+      document.documentElement.style.height = "";
+    };
   }, [isOpen]);
 
   useEffect(() => () => { if (timerRef.current) clearInterval(timerRef.current); }, []);
@@ -152,15 +175,31 @@ export function AuthModal({
     }
 
     setLoading(true);
-    const { error } = await supabase.auth.signInWithOtp({
-      email,
+    
+    const params: any = {
       options: { shouldCreateUser: true },
-    });
+    };
+
+    if (authMethod === "email") {
+      if (!email.includes("@")) {
+        setLoading(false);
+        return setErrorMsg("Please enter a valid email address.");
+      }
+      params.email = email;
+    } else {
+      if (phone.length < 10) {
+        setLoading(false);
+        return setErrorMsg("Please enter a valid 10-digit phone number.");
+      }
+      params.phone = `+91${phone}`;
+    }
+
+    const { error } = await supabase.auth.signInWithOtp(params);
     setLoading(false);
     
     if (error) {
       if (error.message.toLowerCase().includes("sending") || error.message.toLowerCase().includes("smtp")) {
-         return setErrorMsg("Could not send OTP email. Please wait 60 seconds config or try again.");
+         return setErrorMsg("Could not send OTP. Please wait 60 seconds or try again.");
       }
       return setErrorMsg(error.message);
     }
@@ -177,12 +216,15 @@ export function AuthModal({
     setErrorMsg("");
     setLoading(true);
 
-    // Standard Native Call
-    const { data: authData, error: verifyError } = await supabase.auth.verifyOtp({
-      email,
+    const verifyParams: any = {
       token,
-      type: "email",
-    });
+      type: authMethod === "email" ? "email" : "sms",
+    };
+    if (authMethod === "email") verifyParams.email = email;
+    else verifyParams.phone = `+91${phone}`;
+
+    // Standard Native Call
+    const { data: authData, error: verifyError } = await supabase.auth.verifyOtp(verifyParams);
 
     if (verifyError || !authData.user) {
       setLoading(false);
@@ -190,12 +232,12 @@ export function AuthModal({
     }
 
     // Success! We must now ensure they have a profile explicitly.
-    await checkAndResolveProfile(authData.user.id, authData.user.email ?? email);
+    await checkAndResolveProfile(authData.user.id, authData.user.email ?? email, authData.user.phone ?? `+91${phone}`);
   }
 
 
   // Common Profile Resolution for Both Flows
-  async function checkAndResolveProfile(userId: string, userEmail: string) {
+  async function checkAndResolveProfile(userId: string, userEmail: string, userPhone: string = "") {
     try {
       const { data: profile, error } = await supabase
         .from("profiles")
@@ -232,7 +274,7 @@ export function AuthModal({
       const u: AppUser = {
         id: profile.id,
         name: profile.full_name,
-        phone: profile.phone_number || "",
+        phone: profile.phone_number || userPhone || "",
         email: userEmail,
         role: (profile.role as UserRole) || "customer",
         isPro: profile.is_pro || false,
@@ -266,6 +308,7 @@ export function AuthModal({
       id: authUser.id,
       full_name: name.trim(),
       email: authUser.email,
+      phone_number: authUser.phone,
       role: 'customer' // Safe default, portals will block access if wrong anyway.
     });
 
@@ -274,14 +317,14 @@ export function AuthModal({
     const u: AppUser = { 
       id: authUser.id, 
       name: name.trim(), 
-      phone: "", 
+      phone: authUser.phone || "", 
       email: authUser.email || "", 
       role: "customer",
       isPro: false,
       savedAddresses: []
     };
     setUser(u);
-    setSuccessMsg(`Welcome, ${u.name}! Ready to start?`);
+    setSuccessMsg("Welcome to TFB!");
     setStep("success");
     setLoading(false);
     setTimeout(onClose, 1500);
@@ -313,18 +356,25 @@ export function AuthModal({
 
   // ── Derived titles ────────────────────────────────────────────────────────
   const modalTitle = step === "otp"
-    ? "Check your email"
+    ? (authMethod === "email" ? "Check your email" : "Check your phone")
     : isPortal
     ? portalCfg!.title
-    : "Welcome Back! 👋";
+    : "Sign in or Sign up";
 
   const modalSubtitle = step === "otp"
-    ? `We sent a 6-digit code to ${email}`
+    ? `We sent a 6-digit code to ${authMethod === "email" ? email : '+91 ' + phone}`
     : isPortal
     ? portalCfg!.subtitle
     : intent === "personal" ? "Sign in to save your personalized meal plan."
     : intent === "group"    ? "Sign in to complete your group order."
-    : "Enter your email to get a quick sign-in code."; 
+    : `Enter your ${authMethod} to get a quick sign-in code.`; 
+
+  // ── Step Variants ─────────────────────────────────────────────────────────
+  const stepVariants = {
+    initial: { opacity: 0, x: 20 },
+    enter: { opacity: 1, x: 0 },
+    exit: { opacity: 0, x: -20 },
+  };
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (
@@ -365,131 +415,204 @@ export function AuthModal({
               </div>
             </div>
 
-            <div className="p-6 sm:p-8">
-              {errorMsg && (
-                <motion.div initial={{ opacity: 0, y: -5 }} animate={{ opacity: 1, y: 0 }} className="mb-6 p-3 bg-red-50 text-red-600 text-sm rounded-xl border border-red-100 flex items-start gap-2 leading-tight">
-                  <div className="w-4 h-4 mt-0.5 shrink-0 animate-pulse bg-red-600 rounded-full flex justify-center items-center text-[10px] text-white font-bold">!</div>
-                  {errorMsg}
-                </motion.div>
-              )}
+            <div className="p-5 sm:p-8">
+              <AnimatePresence mode="wait">
+                <motion.div
+                  key={step}
+                  variants={stepVariants}
+                  initial="initial"
+                  animate="enter"
+                  exit="exit"
+                  transition={{ duration: 0.2, ease: "easeOut" }}
+                >
+                  {errorMsg && (
+                    <motion.div initial={{ opacity: 0, y: -5 }} animate={{ opacity: 1, y: 0 }} className="mb-6 p-3 bg-red-50 text-red-600 text-sm rounded-xl border border-red-100 flex items-start gap-2 leading-tight">
+                      <div className="w-4 h-4 mt-0.5 shrink-0 animate-pulse bg-red-600 rounded-full flex justify-center items-center text-[10px] text-white font-bold">!</div>
+                      {errorMsg}
+                    </motion.div>
+                  )}
 
-              {/* STEP 1: INITIAL LOGIN (Email/Password for Portals, OTP for Customers) */}
-              {step === "email" && (
-                <form onSubmit={isPortal ? handlePasswordSignIn : handleSendOtp} className="space-y-6">
-                  <div className="space-y-4">
-                    <div className="space-y-1">
-                      <label className="text-sm font-medium text-slate-700 ml-1">Email address</label>
-                      <div className="relative">
-                        <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
-                        <Input
-                          ref={emailRef}
-                          type="email"
-                          placeholder="you@example.com"
-                          value={email}
-                          onChange={(e) => setEmail(e.target.value)}
-                          className="pl-11 h-12 bg-slate-50"
-                          autoCapitalize="none"
-                          autoCorrect="off" 
-                          required
-                        />
+                  {/* STEP 1: INITIAL LOGIN (Email/Password for Portals, OTP for Customers) */}
+                  {step === "email" && (
+                    <form onSubmit={isPortal ? handlePasswordSignIn : handleSendOtp} className="space-y-6">
+                      {!isPortal && (
+                        <div className="flex p-1 bg-slate-100 rounded-xl mb-6 relative">
+                          <motion.div
+                            layoutId="authToggle"
+                            className="absolute inset-1 w-[calc(50%-4px)] bg-white rounded-lg shadow-sm"
+                            initial={false}
+                            animate={{ x: authMethod === "email" ? 0 : "100%" }}
+                            transition={{ type: "spring", bounce: 0.2, duration: 0.4 }}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setAuthMethod("email")}
+                            className={cn(
+                              "relative z-10 flex-1 py-2 text-sm font-semibold rounded-lg transition-colors flex items-center justify-center gap-2",
+                              authMethod === "email" ? "text-slate-900" : "text-slate-500 hover:text-slate-700"
+                            )}
+                          >
+                            <Mail className="w-4 h-4" />
+                            Email
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setAuthMethod("phone")}
+                            className={cn(
+                              "relative z-10 flex-1 py-2 text-sm font-semibold rounded-lg transition-colors flex items-center justify-center gap-2",
+                              authMethod === "phone" ? "text-slate-900" : "text-slate-500 hover:text-slate-700"
+                            )}
+                          >
+                            <Phone className="w-4 h-4" />
+                            Phone
+                          </button>
+                        </div>
+                      )}
+
+                      <div className="space-y-4">
+                        {authMethod === "email" || isPortal ? (
+                          <div className="space-y-1">
+                            <label className="text-sm font-semibold text-slate-700 ml-1">Email address</label>
+                            <div className="relative group">
+                              <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400 group-focus-within:text-tfb-green transition-colors" />
+                              <Input
+                                ref={emailRef}
+                                type="email"
+                                placeholder="you@example.com"
+                                value={email}
+                                onChange={(e) => setEmail(e.target.value)}
+                                className="pl-11 h-12 bg-slate-50 border-slate-200 focus:bg-white transition-all ring-offset-0"
+                                autoCapitalize="none"
+                                autoCorrect="off" 
+                                required
+                              />
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="space-y-1">
+                            <label className="text-sm font-semibold text-slate-700 ml-1">Phone number</label>
+                            <div className="relative group">
+                              <div className="absolute left-0 top-0 bottom-0 flex items-center gap-2 pl-4 pr-3 text-slate-500 font-bold border-r border-slate-200 h-12 my-auto">
+                                <span className="text-sm">+91</span>
+                              </div>
+                              <Input
+                                type="tel"
+                                placeholder="00000 00000"
+                                value={phone}
+                                onChange={(e) => setPhone(e.target.value.replace(/\D/g, "").slice(0, 10))}
+                                className="pl-16 h-12 bg-slate-50 border-slate-200 focus:bg-white transition-all ring-offset-0 font-medium tracking-wide"
+                                required
+                                autoFocus
+                              />
+                            </div>
+                          </div>
+                        )}
+                        
+                        {isPortal && (
+                          <div className="space-y-1">
+                            <label className="text-sm font-semibold text-slate-700 ml-1">Password</label>
+                            <div className="relative group">
+                              <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400 group-focus-within:text-tfb-red transition-colors" />
+                              <Input
+                                type="password"
+                                placeholder="••••••••"
+                                value={password}
+                                onChange={(e) => setPassword(e.target.value)}
+                                className="pl-11 h-12 bg-slate-50 border-slate-200 focus:bg-white transition-all ring-offset-0"
+                                required
+                              />
+                            </div>
+                          </div>
+                        )}
                       </div>
-                    </div>
-                    {isPortal && (
+                      <Button 
+                        type="submit" 
+                        disabled={loading} 
+                        className={cn(
+                          "w-full h-12 text-base font-bold text-white shadow-sm transition-all active:scale-[0.98]", 
+                          isPortal ? "bg-tfb-red hover:bg-red-700" : "bg-tfb-green hover:bg-green-700"
+                        )}
+                      >
+                        {loading ? (isPortal ? "Signing in..." : "Sending...") : (isPortal ? "Sign In" : "Send code")}
+                        {!loading && <ArrowRight className="w-4 h-4 ml-2" />}
+                      </Button>
+                    </form>
+                  )}
+
+                  {/* STEP 2: OTP */}
+                  {step === "otp" && (
+                    <form onSubmit={handleVerifyOtp} className="space-y-6">
+                      <div className="flex justify-between gap-1.5 sm:gap-2">
+                        {otp.map((d, i) => (
+                          <input
+                            key={i}
+                            ref={el => { otpRefs.current[i] = el; }}
+                            type="text"
+                            inputMode="numeric"
+                            pattern="[0-9]*"
+                            maxLength={1}
+                            value={d}
+                            onChange={e => handleOtpChange(i, e.target.value)}
+                            onKeyDown={e => handleOtpKeyDown(i, e)}
+                            onPaste={handleOtpPaste}
+                            className="w-full h-12 sm:h-14 text-center text-lg sm:text-xl font-bold bg-slate-50 border border-slate-200 rounded-xl focus:border-tfb-red focus:bg-white focus:ring-1 focus:ring-tfb-red outline-none transition-all"
+                          />
+                        ))}
+                      </div>
+                      <Button type="submit" disabled={loading || otp.join("").length < 6} className={cn("w-full h-12 text-base font-bold text-white transition-all active:scale-[0.98]", isPortal ? "bg-tfb-red hover:bg-red-700" : "bg-tfb-green hover:bg-green-700")}>
+                        {loading ? "Verifying..." : "Verify Code"}
+                      </Button>
+                      <p className="text-center text-sm text-slate-500">
+                        Didn't get it?{" "}
+                        {resendTimer > 0 ? (
+                          <span className="text-slate-400 font-medium text-xs">Resend in {resendTimer}s</span>
+                        ) : (
+                          <button type="button" onClick={handleSendOtp} className={cn("font-bold hover:underline", isPortal ? "text-tfb-red" : "text-tfb-green")}>
+                            Resend now
+                          </button>
+                        )}
+                      </p>
+                    </form>
+                  )}
+
+                  {/* STEP 3: SETUP PROFILE */}
+                  {step === "profile" && (
+                    <form onSubmit={handleProfileSubmit} className="space-y-6">
                       <div className="space-y-1">
-                        <label className="text-sm font-medium text-slate-700 ml-1">Password</label>
-                        <div className="relative">
-                          <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
+                        <label className="text-sm font-semibold text-slate-700 ml-1">What should we call you?</label>
+                        <div className="relative group">
+                          <User className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400 group-focus-within:text-tfb-green transition-colors" />
                           <Input
-                            type="password"
-                            placeholder="••••••••"
-                            value={password}
-                            onChange={(e) => setPassword(e.target.value)}
-                            className="pl-11 h-12 bg-slate-50"
+                            type="text"
+                            placeholder="Your full name"
+                            value={name}
+                            onChange={(e) => setName(e.target.value)}
+                            className="pl-11 h-12 bg-slate-50 border-slate-200 focus:bg-white transition-all ring-offset-0"
+                            autoFocus
                             required
                           />
                         </div>
                       </div>
-                    )}
-                  </div>
-                  <Button type="submit" disabled={loading} className={cn("w-full h-12 text-base", isPortal ? "bg-tfb-red hover:bg-red-700" : "")}>
-                    {loading ? (isPortal ? "Signing in..." : "Sending...") : (isPortal ? "Sign In" : "Send code")}
-                    {!loading && <ArrowRight className="w-4 h-4 ml-2" />}
-                  </Button>
-                </form>
-              )}
+                      <Button type="submit" disabled={loading} className="w-full h-12 text-base font-bold bg-slate-900 border-b-4 border-slate-950 hover:bg-slate-800 active:border-b-0 active:translate-y-1 transition-all">
+                        {loading ? "Saving..." : "Start my journey"}
+                        {!loading && <Sparkles className="w-4 h-4 ml-2" />}
+                      </Button>
+                    </form>
+                  )}
 
-              {/* STEP 2: OTP */}
-              {step === "otp" && (
-                <form onSubmit={handleVerifyOtp} className="space-y-6">
-                  <div className="flex justify-between gap-2">
-                    {otp.map((d, i) => (
-                      <input
-                        key={i}
-                        ref={el => { otpRefs.current[i] = el; }}
-                        type="text"
-                        inputMode="numeric"
-                        pattern="[0-9]*"
-                        maxLength={1}
-                        value={d}
-                        onChange={e => handleOtpChange(i, e.target.value)}
-                        onKeyDown={e => handleOtpKeyDown(i, e)}
-                        onPaste={handleOtpPaste}
-                        className="w-10 sm:w-12 h-12 sm:h-14 text-center text-lg sm:text-xl font-bold bg-slate-50 border border-slate-200 rounded-xl focus:border-tfb-red focus:ring-1 focus:ring-tfb-red outline-none transition-all"
-                      />
-                    ))}
-                  </div>
-                  <Button type="submit" disabled={loading || otp.join("").length < 6} className={cn("w-full h-12 text-base", isPortal ? "bg-tfb-red hover:bg-red-700" : "")}>
-                    {loading ? "Verifying..." : "Verify Code"}
-                  </Button>
-                  <p className="text-center text-sm text-slate-500">
-                    Didn't get it?{" "}
-                    {resendTimer > 0 ? (
-                      <span className="text-slate-400">Resend in {resendTimer}s</span>
-                    ) : (
-                      <button type="button" onClick={handleSendOtp} className={cn("font-medium hover:underline", isPortal ? "text-tfb-red" : "text-tfb-green")}>
-                        Resend now
-                      </button>
-                    )}
-                  </p>
-                </form>
-              )}
-
-              {/* STEP 3: SETUP PROFILE */}
-              {step === "profile" && (
-                <form onSubmit={handleProfileSubmit} className="space-y-6">
-                  <div className="space-y-1">
-                    <label className="text-sm font-medium text-slate-700 ml-1">What should we call you?</label>
-                    <div className="relative">
-                      <User className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
-                      <Input
-                        type="text"
-                        placeholder="Your full name"
-                        value={name}
-                        onChange={(e) => setName(e.target.value)}
-                        className="pl-11 h-12 bg-slate-50"
-                        autoFocus
-                        required
-                      />
+                  {/* STEP 4: SUCCESS */}
+                  {step === "success" && (
+                    <div className="py-6 flex flex-col items-center justify-center text-center space-y-4">
+                      <motion.div initial={{ scale: 0 }} animate={{ scale: 1, rotate: [0, 10, -10, 0] }} className={cn("w-16 h-16 rounded-2xl flex items-center justify-center text-white shadow-lg", isPortal ? "bg-tfb-red shadow-tfb-red/30" : "bg-tfb-green shadow-tfb-green/30")}>
+                        <Sparkles className="w-8 h-8" />
+                      </motion.div>
+                      <motion.h3 initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="text-xl font-bold text-slate-900 leading-tight">
+                        {successMsg}
+                      </motion.h3>
                     </div>
-                  </div>
-                  <Button type="submit" disabled={loading} className="w-full h-12 text-base bg-slate-900 border-b-4 border-slate-950 hover:bg-slate-800 active:border-b-0 active:translate-y-1">
-                    {loading ? "Saving..." : "Start my journey"}
-                    {!loading && <Sparkles className="w-4 h-4 ml-2" />}
-                  </Button>
-                </form>
-              )}
-
-              {/* STEP 4: SUCCESS */}
-              {step === "success" && (
-                <div className="py-6 flex flex-col items-center justify-center text-center space-y-4">
-                  <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} className={cn("w-16 h-16 rounded-2xl flex items-center justify-center text-white shadow-lg", isPortal ? "bg-tfb-red shadow-tfb-red/30" : "bg-tfb-green shadow-tfb-green/30")}>
-                    <Sparkles className="w-8 h-8" />
-                  </motion.div>
-                  <motion.h3 initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="text-xl font-bold text-slate-900">
-                    {successMsg}
-                  </motion.h3>
-                </div>
-              )}
+                  )}
+                </motion.div>
+              </AnimatePresence>
             </div>
           </motion.div>
         </div>

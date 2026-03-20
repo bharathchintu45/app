@@ -16,10 +16,11 @@ import { OrderEditModal } from "../components/kitchen/OrderEditModal";
 import { useAppSetting } from "../hooks/useAppSettings";
 
 export function KitchenPage({ user, onBack, showToast }: { user: AppUser | null, onBack: () => void, showToast: (msg: string) => void }) {
-  const [tab, setTab] = useState<"orders" | "groups" | "forecast" | "inbox" | "subscriptions">("orders");
+  const [tab, setTab] = useState<"orders" | "groups" | "forecast" | "inbox" | "subscriptions" | "pickup">("orders");
   const [subSlotFilter, setSubSlotFilter] = useState<"All" | "Breakfast" | "Lunch" | "Dinner">("All");
   const [subSubTab, setSubSubTab] = useState<"new" | "preparing" | "ready" | "out_for_delivery" | "delivered" | "cancelled">("new");
   const [groupSubTab, setGroupSubTab] = useState<"new" | "preparing" | "ready" | "out_for_delivery" | "delivered" | "cancelled">("new");
+  const [pickupSubTab, setPickupSubTab] = useState<"new" | "preparing" | "ready" | "delivered" | "cancelled">("new");
   const [orders, setOrders] = useState<OrderReceipt[]>([]);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -29,6 +30,68 @@ export function KitchenPage({ user, onBack, showToast }: { user: AppUser | null,
   const [autoReady, setAutoReady] = useState(() => localStorage.getItem("kitchen_auto_ready") === "true");
   const [previewOrderIds, setPreviewOrderIds] = useState<string[] | null>(null);
   const [editingOrderId, setEditingOrderId] = useState<string | null>(null);
+
+  // Pickup PIN Verification State
+  const [pickupPinModalOpen, setPickupPinModalOpen] = useState(false);
+  const [unreadOrders, setUnreadOrders]   = useState(0);
+  const [unreadGroups, setUnreadGroups]   = useState(0);
+  const [unreadPickups, setUnreadPickups] = useState(0);
+  const [unreadSubs, setUnreadSubs]       = useState(0);
+  const [pickupPinOrderId, setPickupPinOrderId] = useState<string | null>(null);
+  const [pickupPinValue, setPickupPinValue] = useState("");
+  const [pickupPinError, setPickupPinError] = useState(false);
+  const [pickupPinVerifying, setPickupPinVerifying] = useState(false);
+  const [pickupPinSuccess, setPickupPinSuccess] = useState(false);
+  const [pickupShowOverride, setPickupShowOverride] = useState(false);
+  const [pickupOverriding, setPickupOverriding] = useState(false);
+  const pickupPinInputRef = useRef<HTMLInputElement>(null);
+
+  function openPickupPinModal(orderId: string) {
+    setPickupPinOrderId(orderId);
+    setPickupPinValue("");
+    setPickupPinError(false);
+    setPickupPinSuccess(false);
+    setPickupShowOverride(false);
+    setPickupPinModalOpen(true);
+    setTimeout(() => pickupPinInputRef.current?.focus(), 150);
+  }
+
+  async function verifyPickupPin() {
+    if (!pickupPinOrderId) return;
+    setPickupPinVerifying(true);
+    setPickupPinError(false);
+    const rawId = pickupPinOrderId.replace('-today', '');
+    const { data: order } = await supabase.from('orders').select('meta').eq('id', rawId).single();
+    const correctOtp = order?.meta?.delivery_otp;
+    if (pickupPinValue === correctOtp) {
+      await setStatus(pickupPinOrderId, "Delivered");
+      setPickupPinSuccess(true);
+      setTimeout(() => { setPickupPinModalOpen(false); setPickupPinSuccess(false); }, 2000);
+    } else {
+      setPickupPinError(true);
+      showToast("❌ Incorrect PIN. Ask the customer for the correct 4-digit code.");
+    }
+    setPickupPinVerifying(false);
+  }
+
+  async function overridePickupPin() {
+    if (!pickupPinOrderId) return;
+    setPickupOverriding(true);
+    const rawId = pickupPinOrderId.replace('-today', '');
+    const { data: order } = await supabase.from('orders').select('meta').eq('id', rawId).single();
+    const currentMeta = order?.meta || {};
+    await supabase.from('orders').update({
+      meta: { ...currentMeta, pickup_override: true, override_at: new Date().toISOString() }
+    }).eq('id', rawId);
+    await setStatus(pickupPinOrderId, "Delivered");
+    setPickupPinSuccess(true);
+    setTimeout(() => { setPickupPinModalOpen(false); setPickupPinSuccess(false); }, 2000);
+    setPickupOverriding(false);
+  }
+
+  // Delivery Partner State
+  const [deliveryBoys, setDeliveryBoys] = useState<any[]>([]);
+  const [assignments, setAssignments] = useState<any[]>([]);
   
   // Forecast specific state
   const [activeSubs, setActiveSubs] = useState<any[]>([]);
@@ -106,10 +169,14 @@ export function KitchenPage({ user, onBack, showToast }: { user: AppUser | null,
     setFetchError(null);
     if (isFirstLoad.current) setIsLoading(true);
     // Simplified query — no menu_items join (no FK defined)
+    // Only fetch orders that are NOT Delivered or Cancelled, or were created today
+    const todayStr = new Date().toISOString().slice(0, 10);
     const { data, error } = await supabase
       .from('orders')
       .select(`*, order_items ( id, menu_item_id, item_name, quantity, unit_price )`)
-      .order('created_at', { ascending: false });
+      .or(`status.in.(pending,preparing,ready,out_for_delivery),delivery_date.eq.${todayStr}`)
+      .order('created_at', { ascending: false })
+      .limit(150);
 
     if (error) {
       console.error('[Kitchen] Fetch error:', error);
@@ -126,7 +193,7 @@ export function KitchenPage({ user, onBack, showToast }: { user: AppUser | null,
         orderNumber: dbOrder.order_number,
         kind: dbOrder.kind as any,
         createdAt: new Date(dbOrder.created_at).getTime(),
-        headline: dbOrder.kind === 'group' ? "Group Order" : dbOrder.kind === 'personalized' ? "Today's Order" : "A La Carte",
+        headline: dbOrder.kind === 'group' ? "Group Order" : dbOrder.kind === 'personalized' ? "Today's Order" : "Regular Order",
         deliveryAtLabel: dbOrder.delivery_date,
         customer: dbOrder.delivery_details || {
           receiverName: dbOrder.customer_name || 'Unknown',
@@ -175,7 +242,7 @@ export function KitchenPage({ user, onBack, showToast }: { user: AppUser | null,
   const tabRef = useRef(tab);
   
   // KITCHEN ORDER SUB-TAB STATE
-  type KitchenSubTab = "new" | "preparing" | "ready" | "out_for_delivery" | "delivered" | "cancelled";
+  type KitchenSubTab = "new" | "preparing" | "ready" | "pickup" | "out_for_delivery" | "delivered" | "cancelled";
   const [kitchenSubTab, setKitchenSubTab] = useState<KitchenSubTab>("new");
 
   useEffect(() => {
@@ -194,6 +261,13 @@ export function KitchenPage({ user, onBack, showToast }: { user: AppUser | null,
     }
   }, [activeChatId, tab]);
 
+  useEffect(() => {
+    if (tab === "orders") setUnreadOrders(0);
+    if (tab === "groups") setUnreadGroups(0);
+    if (tab === "pickup") setUnreadPickups(0);
+    if (tab === "subscriptions") setUnreadSubs(0);
+  }, [tab]);
+
   const totalUnread = useMemo(() => Object.values(unreadMap).reduce((a, b) => a + b, 0), [unreadMap]);
 
   useEffect(() => {
@@ -206,8 +280,21 @@ export function KitchenPage({ user, onBack, showToast }: { user: AppUser | null,
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'orders' },
-        () => {
-          if (!isFirstLoad.current) playBell();
+        (payload) => {
+          if (!isFirstLoad.current) {
+            playBell();
+            const newOrder = payload.new as any;
+            const isPickup = newOrder.delivery_details?.isPickup === true;
+            const kind = newOrder.kind;
+            // Today's Date in IST
+            const subTodayStr = new Date(new Date().getTime() + 5.5 * 60 * 60 * 1000).toISOString().slice(0, 10);
+            const isTodaySub = (kind === 'personalized' || kind === 'subscription') && newOrder.delivery_date === subTodayStr;
+
+            if (tabRef.current !== "orders" && kind === "regular" && !isPickup) setUnreadOrders(p => p + 1);
+            if (tabRef.current !== "groups" && kind === "group") setUnreadGroups(p => p + 1);
+            if (tabRef.current !== "pickup" && isPickup) setUnreadPickups(p => p + 1);
+            if (tabRef.current !== "subscriptions" && isTodaySub) setUnreadSubs(p => p + 1);
+          }
           fetchLiveOrders();
         }
       )
@@ -227,6 +314,27 @@ export function KitchenPage({ user, onBack, showToast }: { user: AppUser | null,
           }
         }
       )
+      .subscribe();
+
+    // Delivery data fetch + realtime
+    async function fetchDeliveryData() {
+      try {
+        const { data: db, error: dbErr } = await supabase.from('delivery_boys').select('*').order('name');
+        if (!dbErr && db) setDeliveryBoys(db);
+        else console.warn('[Kitchen] delivery_boys fetch:', dbErr?.message);
+        const { data: da, error: daErr } = await supabase.from('delivery_assignments').select('*');
+        if (!daErr && da) setAssignments(da);
+        else console.warn('[Kitchen] delivery_assignments fetch:', daErr?.message);
+      } catch (e) {
+        console.warn('[Kitchen] Delivery tables may not exist yet');
+      }
+    }
+    fetchDeliveryData();
+
+    const deliveryChannel = supabase
+      .channel('kitchen-delivery-sync')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'delivery_assignments' }, () => fetchDeliveryData())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'delivery_boys' }, () => fetchDeliveryData())
       .subscribe();
 
     // -------------------------------------------------------------
@@ -252,54 +360,42 @@ export function KitchenPage({ user, onBack, showToast }: { user: AppUser | null,
       .subscribe();
 
     // -------------------------------------------------------------
-    // FORECAST DATA FETCH + REALTIME
+    // FORECAST & SUBSCRIPTION DATA (Lazy Load when tab is active)
     // -------------------------------------------------------------
-    supabase.from('orders')
-      .select('id, meta, delivery_date, created_at')
-      .in('kind', ['personalized', 'subscription'])
-      .not('meta->>is_auto_generated', 'eq', 'true')
-      .filter('status', 'not.in', '(cancelled,Cancelled,removed_by_admin)')
-      .then(({data}) => setActiveSubs(data || []));
-
-    supabase.from('subscription_swaps').select('*').then(({data}) => setAllSwaps(data || []));
-    supabase.from('menu_items').select('id, name').then(({data}) => setAllMenuItems(data || []));
-
-    // Keep forecast data live via realtime (already listening to orders channel for Live Orders,
-    // but we can add a specific handler if we want, or just re-fetch in the existing channel)
-    // NOTE: For simplicity, the existing 'kitchen-orders-realtime' channel fetches LiveOrders.
-    // We can just re-fetch active subs when orders change.
-    const forecastChannel = supabase
-      .channel('kitchen-forecast-orders')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, () => {
-        supabase.from('orders')
-          .select('id, meta, delivery_date, created_at')
-          .in('kind', ['personalized', 'subscription'])
-          .not('meta->>is_auto_generated', 'eq', 'true')
-          .filter('status', 'not.in', '(cancelled,Cancelled,removed_by_admin)')
-          .then(({data}) => setActiveSubs(data || []));
-      })
-      .subscribe();
-
-    const swapsChannel = supabase
-      .channel('kitchen-forecast-swaps')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'subscription_swaps' }, (payload) => {
-        if (payload.eventType === 'DELETE') {
-          setAllSwaps(prev => prev.filter(s => s.id !== (payload.old as any).id));
-        } else if (payload.eventType === 'INSERT') {
-          setAllSwaps(prev => [...prev, payload.new as any]);
-        } else if (payload.eventType === 'UPDATE') {
-          setAllSwaps(prev => prev.map(s => s.id === (payload.new as any).id ? payload.new as any : s));
-        }
-      })
-      .subscribe();
+    let forecastChannel: any = null;
+    if (tab === "forecast" || tab === "subscriptions") {
+      const fetchForecastData = async () => {
+        const [activeRes, swapsRes, menuRes] = await Promise.all([
+          supabase.from('orders')
+            .select('id, meta, delivery_date, created_at')
+            .in('kind', ['personalized', 'subscription'])
+            .not('meta->>is_auto_generated', 'eq', 'true')
+            .filter('status', 'not.in', '(cancelled,Cancelled,removed_by_admin)'),
+          supabase.from('subscription_swaps').select('*'),
+          supabase.from('menu_items').select('id, name')
+        ]);
+        
+        if (activeRes.data) setActiveSubs(activeRes.data);
+        if (swapsRes.data) setAllSwaps(swapsRes.data);
+        if (menuRes.data) setAllMenuItems(menuRes.data);
+      };
+      
+      fetchForecastData();
+      
+      forecastChannel = supabase
+        .channel('kitchen-forecast-sync')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, fetchForecastData)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'subscription_swaps' }, fetchForecastData)
+        .subscribe();
+    }
 
     return () => {
       supabase.removeChannel(channel);
+      supabase.removeChannel(deliveryChannel);
       supabase.removeChannel(inboxChannel);
-      supabase.removeChannel(forecastChannel);
-      supabase.removeChannel(swapsChannel);
+      if (forecastChannel) supabase.removeChannel(forecastChannel);
     };
-  }, [muted, user?.id]);
+  }, [muted, user?.id, tab]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -370,13 +466,24 @@ export function KitchenPage({ user, onBack, showToast }: { user: AppUser | null,
   const [forecastDate, setForecastDate] = useState(() => dayKey(addDays(new Date(), 1)));
   const [includeDone, setIncludeDone] = useState(false);
 
-  // Live Orders: regular orders only
+  // Live Orders: regular orders only (Delivery)
   const visibleOrders = useMemo(() => orders.filter((o: OrderReceipt) => {
-    if (o.kind !== "regular") return false;
+    if (o.kind !== "regular" || o.customer?.isPickup) return false;
     const st = o.status || "New";
     if (!includeDone && (st === "Delivered" || st === "Cancelled")) return false;
     return true;
   }), [includeDone, orders]);
+
+  // Pickup Orders: regular orders only (Pickup)
+  const pickupOrders = useMemo(() => orders.filter(o => o.kind === "regular" && o.customer?.isPickup), [orders]);
+  const visiblePickupOrders = useMemo(() => 
+    pickupOrders.filter(o => {
+      const st = o.status || "New";
+      if (!includeDone && (st === "Delivered" || st === "Cancelled")) return false;
+      return true;
+    }).sort((a,b) => b.createdAt - a.createdAt), 
+  [pickupOrders, includeDone]);
+  const newPickupCount = useMemo(() => pickupOrders.filter(o => !o.status || o.status === "New").length, [pickupOrders]);
 
   // Group Orders tab
   const groupOrders = useMemo(() => orders.filter(o => o.kind === "group"), [orders]);
@@ -431,15 +538,6 @@ export function KitchenPage({ user, onBack, showToast }: { user: AppUser | null,
   }, [orders, subTodayStr]);
   const newSubCount = useMemo(() => subOrders.filter(o => !o.status || o.status === "New").length, [subOrders]);
   
-  const subStatusCounts = useMemo(() => ({
-    new: subOrders.filter(o => !o.status || o.status === "New").length,
-    preparing: subOrders.filter(o => o.status === "Preparing").length,
-    ready: subOrders.filter(o => o.status === "Ready").length,
-    out_for_delivery: subOrders.filter(o => o.status === "Out for delivery").length,
-    delivered: subOrders.filter(o => o.status === "Delivered").length,
-    cancelled: subOrders.filter(o => o.status === "Cancelled").length,
-  }), [subOrders]);
-
   const subSlotCounts = useMemo(() => {
     // Only count orders that still need processing in the kitchen
     const pending = subOrders.filter(o => {
@@ -455,22 +553,10 @@ export function KitchenPage({ user, onBack, showToast }: { user: AppUser | null,
     };
   }, [subOrders]);
 
-  const filteredSubOrders = useMemo(() => {
+  const slotFilteredSubOrders = useMemo(() => {
     let base = subOrders;
     
-    // 1. Filter by Status Sub-tab
-    base = base.filter(o => {
-      const st = o.status || "New";
-      if (subSubTab === "new") return !o.status || st === "New";
-      if (subSubTab === "preparing") return st === "Preparing";
-      if (subSubTab === "ready") return st === "Ready";
-      if (subSubTab === "out_for_delivery") return st === "Out for delivery";
-      if (subSubTab === "delivered") return st === "Delivered";
-      if (subSubTab === "cancelled") return st === "Cancelled";
-      return false;
-    });
-
-    // 2. Filter by Slot and slice lines
+    // Filter by Slot and slice lines
     if (subSlotFilter === "All") return base;
     
     const slotAliasMap: Record<string, string[]> = {
@@ -486,7 +572,20 @@ export function KitchenPage({ user, onBack, showToast }: { user: AppUser | null,
         ...o,
         lines: o.lines.filter((l: any) => searchTerms.some(term => l.label.includes(term)))
       }));
-  }, [subOrders, subSlotFilter, subSubTab]);
+  }, [subOrders, subSlotFilter]);
+
+  const filteredSubOrders = useMemo(() => {
+    return slotFilteredSubOrders.filter(o => {
+      const st = (o.status || "New").toLowerCase();
+      if (subSubTab === "new") return st === "new";
+      if (subSubTab === "preparing") return st === "preparing";
+      if (subSubTab === "ready") return st === "ready";
+      if (subSubTab === "out_for_delivery") return st === "out_for_delivery";
+      if (subSubTab === "delivered") return st === "delivered";
+      if (subSubTab === "cancelled") return st === "cancelled";
+      return false;
+    });
+  }, [slotFilteredSubOrders, subSubTab]);
 
   async function setStatus(id: string, status: KitchenStatus) {
     const rawId = id.replace('-today', '');
@@ -593,6 +692,8 @@ export function KitchenPage({ user, onBack, showToast }: { user: AppUser | null,
        delivered: deliveredCount
     };
   }, [visibleOrders]);
+
+
 
   // --- START AUTO-PROCESSING ---
   useEffect(() => {
@@ -702,23 +803,89 @@ export function KitchenPage({ user, onBack, showToast }: { user: AppUser | null,
            {subTab === "preparing" && (
              <button onClick={() => setStatus(o.id, "Ready")} className="w-full bg-sky-500 hover:bg-sky-600 text-white font-black text-xs uppercase tracking-widest py-3 rounded-lg shadow-sm transition-colors">Mark Ready</button>
            )}
-           {subTab === "ready" && (
-             <button onClick={() => setStatus(o.id, "Out for delivery")} className="w-full bg-emerald-500 hover:bg-emerald-600 text-white font-black text-xs uppercase tracking-widest py-3 rounded-lg shadow-sm transition-colors">Send Out</button>
-           )}
+
+           {/* Ready tab: Assign Delivery Partner + conditional Send Out */}
+           {subTab === "ready" && (() => {
+             if (o.customer?.isPickup) {
+               return (
+                 <button onClick={() => openPickupPinModal(o.id)} className="w-full bg-slate-800 hover:bg-slate-900 text-white font-black text-xs uppercase tracking-widest py-3 rounded-lg shadow-sm transition-colors mt-auto">🔒 Verify PIN & Hand Over</button>
+               );
+             }
+
+             const rawId = o.id.replace('-today', '');
+             const existing = assignments.find((a: any) => a.order_id === rawId);
+             const assignedBoy = existing ? deliveryBoys.find((b: any) => b.id === existing.delivery_boy_id) : null;
+             return (
+               <>
+                 <div className="w-full">
+                   <div className="flex items-center justify-between mb-1">
+                     <div className="text-[9px] font-black uppercase text-slate-400 tracking-widest">Delivery Partner</div>
+                     {!existing && (
+                       <button
+                         onClick={async () => {
+                           const activeBoys = deliveryBoys.filter((b: any) => b.is_active);
+                           if (activeBoys.length === 0) { showToast("⚠️ No partners!"); return; }
+                           
+                           const loadMap: Record<string, number> = {};
+                           activeBoys.forEach((b: any) => { loadMap[b.id] = 0; });
+                           assignments.forEach((a: any) => {
+                             if (a.status !== 'delivered' && loadMap[a.delivery_boy_id] !== undefined) loadMap[a.delivery_boy_id]++;
+                           });
+                           
+                           const bestBoy = activeBoys.reduce((prev: any, curr: any) => (loadMap[curr.id] ?? 0) < (loadMap[prev.id] ?? 0) ? curr : prev);
+                           await supabase.from('delivery_assignments').insert({ order_id: rawId, delivery_boy_id: bestBoy.id, status: 'assigned' });
+                           showToast(`⚡ Assigned to ${bestBoy.name}`);
+                         }}
+                         className="text-[9px] font-black text-amber-600 hover:text-amber-700 uppercase tracking-wider bg-amber-50 px-1.5 py-0.5 rounded transition-colors"
+                       >
+                         ⚡ Auto
+                       </button>
+                     )}
+                   </div>
+                   <select
+                     value={existing?.delivery_boy_id || ""}
+                     onChange={async (e) => {
+                       const boyId = e.target.value;
+                       if (!boyId) return;
+                       if (existing) {
+                         await supabase.from('delivery_assignments').update({ delivery_boy_id: boyId, status: 'assigned' }).eq('id', existing.id);
+                       } else {
+                         await supabase.from('delivery_assignments').insert({ order_id: rawId, delivery_boy_id: boyId, status: 'assigned' });
+                       }
+                       showToast(`✅ Assigned to ${deliveryBoys.find((b: any) => b.id === boyId)?.name || 'partner'}`);
+                     }}
+                     className="w-full h-9 px-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold text-slate-700 focus:ring-2 focus:ring-emerald-400 outline-none transition-all"
+                   >
+                     <option value="">{assignedBoy ? `✅ ${assignedBoy.name}` : '— Select Partner —'}</option>
+                     {deliveryBoys.filter((b: any) => b.is_active).map((b: any) => (
+                       <option key={b.id} value={b.id}>{b.name} {existing?.delivery_boy_id === b.id ? '(current)' : ''}</option>
+                     ))}
+                   </select>
+                   {assignedBoy && (
+                     <div className="text-[9px] font-bold text-emerald-600 mt-1 truncate">📱 {assignedBoy.phone}</div>
+                   )}
+                 </div>
+                 {assignedBoy && (
+                   <button onClick={() => setStatus(o.id, "Out for delivery")} className="w-full bg-emerald-500 hover:bg-emerald-600 text-white font-black text-xs uppercase tracking-widest py-2.5 rounded-lg shadow-sm transition-colors">Send Out</button>
+                 )}
+               </>
+             );
+           })()}
+
            {subTab === "out_for_delivery" && (
              <button onClick={() => setStatus(o.id, "Delivered")} className="w-full bg-purple-500 hover:bg-purple-600 text-white font-black text-xs uppercase tracking-widest py-3 rounded-lg shadow-sm transition-colors">Delivered</button>
            )}
 
            {/* Edit Order Button — always available */}
-            <button 
-              onClick={() => setEditingOrderId(o.id)}
-              className="w-full bg-slate-100 hover:bg-amber-100 text-slate-600 hover:text-amber-700 border border-slate-200 hover:border-amber-300 py-2 rounded-lg transition-colors text-[10px] font-black uppercase tracking-widest flex items-center justify-center gap-2"
-            >
-              ✏️ Edit
-            </button>
+           <button 
+             onClick={() => setEditingOrderId(o.id)}
+             className="w-full bg-slate-100 hover:bg-amber-100 text-slate-600 hover:text-amber-700 border border-slate-200 hover:border-amber-300 py-2 rounded-lg transition-colors text-[10px] font-black uppercase tracking-widest flex items-center justify-center gap-2"
+           >
+             ✏️ Edit
+           </button>
 
-            {/* Print Label Button is only available in Ready status for individual printing */}
-           {subTab === "ready" && (
+           {/* Print Label Button — available in Preparing status only */}
+           {subTab === "preparing" && (
              <button 
                onClick={() => setPreviewOrderIds([o.id])}
                className="w-full mt-auto bg-black hover:bg-slate-800 text-white py-2 rounded-lg transition-colors text-[10px] font-black uppercase tracking-widest flex items-center justify-center gap-2 shadow-sm"
@@ -763,21 +930,27 @@ export function KitchenPage({ user, onBack, showToast }: { user: AppUser | null,
       <div className="bg-slate-100 p-1 rounded-2xl shadow-inner inline-flex mb-8 flex-wrap gap-y-1">
         <button onClick={() => setTab("orders")} className={cn("flex items-center gap-2 text-sm font-semibold rounded-xl py-2 px-5 transition-all outline-none", tab === "orders" ? "bg-white text-emerald-800 shadow-sm border border-emerald-100/50" : "text-slate-500 hover:text-slate-800")}>
           Live Orders
-          {orderStats.new > 0 && (
-            <span className="bg-rose-500 text-white text-[10px] px-1.5 py-0.5 rounded-full">{orderStats.new}</span>
+          {(unreadOrders > 0 || orderStats.new > 0) && (
+            <span className={cn("text-white text-[10px] px-1.5 py-0.5 rounded-full shadow-sm", unreadOrders > 0 ? "bg-rose-600 animate-pulse" : "bg-slate-400")}>{unreadOrders > 0 ? unreadOrders : orderStats.new}</span>
           )}
         </button>
         <button onClick={() => { setTab("groups"); setGroupSubTab("new"); }} className={cn("flex items-center gap-2 text-sm font-semibold rounded-xl py-2 px-5 transition-all outline-none", tab === "groups" ? "bg-white text-orange-800 shadow-sm border border-orange-100/50" : "text-slate-500 hover:text-slate-800")}>
           Group Orders
-          {newGroupCount > 0 && (
-            <span className="bg-rose-500 text-white text-[10px] px-1.5 py-0.5 rounded-full">{newGroupCount}</span>
-          )}
+          {unreadGroups > 0 || newGroupCount > 0 ? (
+            <span className={cn("text-white text-[10px] px-1.5 py-0.5 rounded-full shadow-sm", unreadGroups > 0 ? "bg-rose-600 animate-pulse" : "bg-slate-400")}>{unreadGroups > 0 ? unreadGroups : newGroupCount}</span>
+          ) : null}
+        </button>
+        <button onClick={() => { setTab("pickup"); setPickupSubTab("new"); }} className={cn("flex items-center gap-2 text-sm font-semibold rounded-xl py-2 px-5 transition-all outline-none", tab === "pickup" ? "bg-white text-indigo-800 shadow-sm border border-indigo-100/50" : "text-slate-500 hover:text-slate-800")}>
+          Pickup Orders
+          {unreadPickups > 0 || newPickupCount > 0 ? (
+            <span className={cn("text-white text-[10px] px-1.5 py-0.5 rounded-full shadow-sm", unreadPickups > 0 ? "bg-rose-600 animate-pulse" : "bg-slate-400")}>{unreadPickups > 0 ? unreadPickups : newPickupCount}</span>
+          ) : null}
         </button>
         <button onClick={() => { setTab("subscriptions"); setSubSlotFilter("All"); }} className={cn("flex items-center gap-2 text-sm font-semibold rounded-xl py-2 px-5 transition-all outline-none", tab === "subscriptions" ? "bg-white text-violet-800 shadow-sm border border-violet-100/50" : "text-slate-500 hover:text-slate-800")}>
           📦 Subscriptions Today
-          {newSubCount > 0 && (
-            <span className="bg-rose-500 text-white text-[10px] px-1.5 py-0.5 rounded-full">{newSubCount}</span>
-          )}
+          {unreadSubs > 0 || newSubCount > 0 ? (
+            <span className={cn("text-white text-[10px] px-1.5 py-0.5 rounded-full shadow-sm", unreadSubs > 0 ? "bg-rose-600 animate-pulse" : "bg-slate-400")}>{unreadSubs > 0 ? unreadSubs : newSubCount}</span>
+          ) : null}
         </button>
         <button onClick={() => setTab("forecast")} className={cn("text-sm font-semibold rounded-xl py-2 px-5 transition-all outline-none", tab === "forecast" ? "bg-white text-emerald-800 shadow-sm border border-emerald-100/50" : "text-slate-500 hover:text-slate-800")}>Production Forecast</button>
         {!chatSetting.loading && chatSetting.value && (<button onClick={() => { setTab("inbox"); }} className={cn("flex items-center gap-2 text-sm font-semibold rounded-xl py-2 px-5 transition-all outline-none", tab === "inbox" ? "bg-white text-emerald-800 shadow-sm border border-emerald-100/50" : "text-slate-500 hover:text-slate-800")}>
@@ -909,7 +1082,12 @@ export function KitchenPage({ user, onBack, showToast }: { user: AppUser | null,
                       { key: "out_for_delivery" as const, label: "Out for Delivery", color: "border-purple-500 text-purple-700"  },
                       { key: "delivered" as const,        label: "Delivered",        color: "border-slate-800 text-slate-800"    },
                       { key: "cancelled" as const,        label: "Cancelled",        color: "border-rose-500 text-rose-700"      },
-                    ]).map(({ key, label, color }) => (
+                    ]).map(({ key, label, color }) => {
+                      const count = slotFilteredSubOrders.filter(o => {
+                        const st = (o.status || "New").toLowerCase();
+                        return st === key;
+                      }).length;
+                      return (
                       <div key={key} className="flex flex-col gap-1 shrink-0 items-center">
                         <button
                           onClick={() => setSubSubTab(key)}
@@ -917,7 +1095,7 @@ export function KitchenPage({ user, onBack, showToast }: { user: AppUser | null,
                             subSubTab === key ? color : "border-transparent text-slate-400 hover:text-slate-600"
                           )}
                         >
-                          {label} ({subStatusCounts[key]})
+                          {label} ({count})
                         </button>
                         {key === "new" && subSubTab === "new" && (
                           <label className="flex items-center justify-center gap-1 text-[9px] uppercase font-black tracking-widest text-amber-600 pb-1 cursor-pointer bg-amber-50 px-1 rounded">
@@ -930,7 +1108,8 @@ export function KitchenPage({ user, onBack, showToast }: { user: AppUser | null,
                           </label>
                         )}
                       </div>
-                    ))}
+                    );
+                    })}
                   </div>
                </div>
             </CardHeader>
@@ -1140,6 +1319,73 @@ export function KitchenPage({ user, onBack, showToast }: { user: AppUser | null,
             </div>
           </CardContent>
         </Card>
+      ) : tab === "pickup" ? (
+        <div className="space-y-6">
+          <Card className="border-t-4 border-t-indigo-500 shadow-lg">
+            <CardHeader className="bg-indigo-50/50 border-b border-indigo-100">
+              <SectionTitle icon={UtensilsCrossed} title="Pickup Orders" subtitle="Orders waiting for customer pickup." />
+            </CardHeader>
+            <CardContent className="pt-4">
+              {visiblePickupOrders.length === 0 ? (
+                <div className="py-16 text-center">
+                  <UtensilsCrossed className="w-12 h-12 text-slate-200 mx-auto mb-4" />
+                  <p className="text-slate-400 font-medium italic">No pickup orders yet.</p>
+                </div>
+              ) : (
+                <div className="space-y-6">
+                  <div className="flex border-b border-slate-200 gap-6 px-1 overflow-x-auto hide-scrollbar sticky top-0 bg-indigo-50/60 z-20 pt-2 items-start">
+                    {([
+                      { key: "new" as const,              label: "New",              color: "border-amber-500 text-amber-700"    },
+                      { key: "preparing" as const,        label: "Preparing",        color: "border-sky-500 text-sky-700"        },
+                      { key: "ready" as const,            label: "Ready",            color: "border-emerald-500 text-emerald-700"},
+                      { key: "delivered" as const,        label: "Picked Up",        color: "border-slate-800 text-slate-800"    },
+                      { key: "cancelled" as const,        label: "Cancelled",        color: "border-rose-500 text-rose-700"      },
+                    ]).map(({ key, label, color }) => {
+                      const count = visiblePickupOrders.filter(o => {
+                        const st = o.status || "New";
+                        if (key === "new") return !o.status || st === "New";
+                        if (key === "preparing") return st === "Preparing";
+                        if (key === "ready") return st === "Ready";
+                        if (key === "delivered") return st === "Delivered";
+                        if (key === "cancelled") return st === "Cancelled";
+                        return false;
+                      }).length;
+                      return (
+                        <button
+                          key={key}
+                          onClick={() => setPickupSubTab(key)}
+                          className={cn("whitespace-nowrap pb-3 font-bold text-sm transition-all border-b-[3px] shrink-0",
+                            pickupSubTab === key ? color : "border-transparent text-slate-500 hover:text-slate-700"
+                          )}
+                        >
+                          {label} ({count})
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  <div className="flex flex-col gap-4">
+                    {(() => {
+                      const filtered = visiblePickupOrders.filter(o => {
+                        const st = o.status || "New";
+                        if (pickupSubTab === "new") return !o.status || st === "New";
+                        if (pickupSubTab === "preparing") return st === "Preparing";
+                        if (pickupSubTab === "ready") return st === "Ready";
+                        if (pickupSubTab === "delivered") return st === "Delivered";
+                        if (pickupSubTab === "cancelled") return st === "Cancelled";
+                        return false;
+                      });
+                      if (filtered.length === 0) return (
+                        <div className="py-12 text-center text-slate-400 font-medium italic bg-white rounded-xl border border-dashed border-slate-200">No orders in this status.</div>
+                      );
+                      return filtered.map(o => renderOrderRow(o, pickupSubTab));
+                    })()}
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
       ) : isLoading ? (
         <div className="space-y-4">
           <SkeletonKitchenCard />
@@ -1195,7 +1441,7 @@ export function KitchenPage({ user, onBack, showToast }: { user: AppUser | null,
                  </div>
               </button>
 
-              <button onClick={() => setKitchenSubTab("delivered")} className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden flex flex-col opacity-60 hover:opacity-100 hover:border-slate-400 transition-all">
+               <button onClick={() => setKitchenSubTab("delivered")} className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden flex flex-col opacity-60 hover:opacity-100 hover:border-slate-400 transition-all">
                  <div className="bg-slate-100 py-2 border-b border-slate-200 text-center">
                    <div className="text-slate-500 text-[10px] uppercase font-bold tracking-widest">Delivered</div>
                  </div>
@@ -1223,7 +1469,7 @@ export function KitchenPage({ user, onBack, showToast }: { user: AppUser | null,
                      onClick={() => setKitchenSubTab("new")}
                      className={cn("whitespace-nowrap pb-1 font-bold text-sm transition-all border-b-[3px]", kitchenSubTab === "new" ? "border-amber-500 text-amber-700" : "border-transparent text-slate-500 hover:text-slate-700")}
                    >
-                     New ({visibleOrders.filter((o: OrderReceipt) => !o.status || o.status === "New").length})
+                     New ({visibleOrders.filter((o: OrderReceipt) => (!o.status || o.status === "New") && !o.customer.isPickup).length})
                    </button>
                    {kitchenSubTab === "new" && (
                      <label className="flex items-center justify-center gap-1.5 text-[10px] uppercase font-black tracking-widest text-amber-600 pb-2 cursor-pointer bg-amber-50 px-2 rounded-md">
@@ -1232,38 +1478,65 @@ export function KitchenPage({ user, onBack, showToast }: { user: AppUser | null,
                    )}
                  </div>
 
-                 {/* Preparing Tab with Auto Ready Toggle */}
-                 <div className="flex flex-col gap-1.5 shrink-0">
-                   <button 
-                     onClick={() => setKitchenSubTab("preparing")}
-                     className={cn("whitespace-nowrap pb-1 font-bold text-sm transition-all border-b-[3px]", kitchenSubTab === "preparing" ? "border-sky-500 text-sky-700" : "border-transparent text-slate-500 hover:text-slate-700")}
-                   >
-                     Preparing ({visibleOrders.filter((o: OrderReceipt) => o.status === "Preparing").length})
-                   </button>
-                   {kitchenSubTab === "preparing" && (
-                     <label className="flex items-center justify-center gap-1.5 text-[10px] uppercase font-black tracking-widest text-sky-600 pb-2 cursor-pointer bg-sky-50 px-2 rounded-md">
-                       <input type="checkbox" checked={autoReady} onChange={e => setAutoReady(e.target.checked)} className="accent-sky-600" /> Auto Ready
-                     </label>
-                   )}
-                 </div>
+                 {/* Preparing Tab with Bulk Print Action */}
+                  <div className="flex flex-col gap-1.5 shrink-0">
+                    <button 
+                      onClick={() => setKitchenSubTab("preparing")}
+                      className={cn("whitespace-nowrap pb-1 font-bold text-sm transition-all border-b-[3px]", kitchenSubTab === "preparing" ? "border-sky-500 text-sky-700" : "border-transparent text-slate-500 hover:text-slate-700")}
+                    >
+                      Preparing ({visibleOrders.filter((o: OrderReceipt) => o.status === "Preparing").length})
+                    </button>
+                    {kitchenSubTab === "preparing" && visibleOrders.filter((o: OrderReceipt) => o.status === "Preparing").length > 0 && (
+                      <button 
+                        onClick={() => setPreviewOrderIds(visibleOrders.filter((o: OrderReceipt) => o.status === "Preparing").map(o => o.id))}
+                        className="text-[10px] uppercase font-black tracking-widest text-white bg-sky-600 hover:bg-sky-700 rounded px-2 py-1 pb-1 mb-1 transition-colors flex items-center justify-center gap-1 shadow-sm"
+                      >
+                        <Printer className="w-3 h-3" /> Print All Bills
+                      </button>
+                    )}
+                  </div>
 
-                 {/* Ready Tab with Print All Batch Action */}
+                 {/* Ready Tab with Assign All Partners Action */}
                  <div className="flex flex-col gap-1.5 shrink-0">
-                   <button 
-                     onClick={() => setKitchenSubTab("ready")}
-                     className={cn("whitespace-nowrap pb-1 font-bold text-sm transition-all border-b-[3px]", kitchenSubTab === "ready" ? "border-emerald-500 text-emerald-700" : "border-transparent text-slate-500 hover:text-slate-700")}
-                   >
-                     Ready ({visibleOrders.filter((o: OrderReceipt) => o.status === "Ready").length})
-                   </button>
-                   {kitchenSubTab === "ready" && visibleOrders.filter((o: OrderReceipt) => o.status === "Ready").length > 0 && (
-                     <button 
-                       onClick={() => setPreviewOrderIds(visibleOrders.filter((o: OrderReceipt) => o.status === "Ready").map(o => o.id))}
-                       className="text-[10px] uppercase font-black tracking-widest text-white bg-emerald-600 hover:bg-emerald-700 rounded px-2 py-1 pb-1 mb-1 transition-colors flex items-center justify-center gap-1 shadow-sm"
-                     >
-                       <Printer className="w-3 h-3" /> Print All Bills
-                     </button>
-                   )}
-                 </div>
+                    <button 
+                      onClick={() => setKitchenSubTab("ready")}
+                      className={cn("whitespace-nowrap pb-1 font-bold text-sm transition-all border-b-[3px]", kitchenSubTab === "ready" ? "border-emerald-500 text-emerald-700" : "border-transparent text-slate-500 hover:text-slate-700")}
+                    >
+                      Ready ({visibleOrders.filter((o: OrderReceipt) => o.status === "Ready").length})
+                    </button>
+                    {kitchenSubTab === "ready" && visibleOrders.filter((o: OrderReceipt) => o.status === "Ready").length > 0 && (
+                      <button 
+                        onClick={async () => {
+                          const readyOrders = visibleOrders.filter((o: OrderReceipt) => o.status === "Ready");
+                          const activeBoys = deliveryBoys.filter((b: any) => b.is_active);
+                          if (activeBoys.length === 0) { showToast("⚠️ No active delivery partners!"); return; }
+                          
+                          const loadMap: Record<string, number> = {};
+                          activeBoys.forEach((b: any) => { loadMap[b.id] = 0; });
+                          assignments.forEach((a: any) => {
+                            if (a.status !== 'delivered' && loadMap[a.delivery_boy_id] !== undefined) loadMap[a.delivery_boy_id]++;
+                          });
+
+                          let assigned = 0;
+                          for (const o of readyOrders) {
+                            const rawId = o.id.replace('-today', '');
+                            const existing = assignments.find((a: any) => a.order_id === rawId);
+                            if (existing) continue;
+
+                            const bestBoy = activeBoys.reduce((prev: any, curr: any) => (loadMap[curr.id] ?? 0) < (loadMap[prev.id] ?? 0) ? curr : prev);
+                            await supabase.from('delivery_assignments').insert({ order_id: rawId, delivery_boy_id: bestBoy.id, status: 'assigned' });
+                            loadMap[bestBoy.id]++;
+                            assigned++;
+                          }
+                          showToast(`⚡ Auto-assigned ${assigned} order${assigned !== 1 ? 's' : ''} to partners`);
+                        }}
+                        className="text-[10px] uppercase font-black tracking-widest text-white bg-emerald-600 hover:bg-emerald-700 rounded px-2 py-1 pb-1 mb-1 transition-colors flex items-center justify-center gap-1 shadow-sm"
+                      >
+                        🛵 Assign All Partners
+                      </button>
+                    )}
+                  </div>
+ 
 
                  <button 
                    onClick={() => setKitchenSubTab("out_for_delivery")}
@@ -1288,22 +1561,23 @@ export function KitchenPage({ user, onBack, showToast }: { user: AppUser | null,
                {/* Render Area based on selected tab */}
                <div className="flex flex-col gap-4">
                  {kitchenSubTab === "new" && (
-                   visibleOrders.filter((o: OrderReceipt) => !o.status || o.status === "New").length === 0 ? (
+                   visibleOrders.filter((o: OrderReceipt) => (!o.status || o.status === "New") && !o.customer.isPickup).length === 0 ? (
                      <div className="py-12 text-center text-slate-400 font-medium italic bg-white rounded-xl border border-dashed border-slate-200">No new orders waiting.</div>
-                   ) : visibleOrders.filter((o: OrderReceipt) => !o.status || o.status === "New").map(o => renderOrderRow(o))
+                   ) : visibleOrders.filter((o: OrderReceipt) => (!o.status || o.status === "New") && !o.customer.isPickup).map(o => renderOrderRow(o))
                  )}
 
                  {kitchenSubTab === "preparing" && (
-                   visibleOrders.filter((o: OrderReceipt) => o.status === "Preparing").length === 0 ? (
+                   visibleOrders.filter((o: OrderReceipt) => o.status === "Preparing" && !o.customer.isPickup).length === 0 ? (
                      <div className="py-12 text-center text-slate-400 font-medium italic bg-white rounded-xl border border-dashed border-slate-200">No orders currently in preparation.</div>
-                   ) : visibleOrders.filter((o: OrderReceipt) => o.status === "Preparing").map(o => renderOrderRow(o))
+                   ) : visibleOrders.filter((o: OrderReceipt) => o.status === "Preparing" && !o.customer.isPickup).map(o => renderOrderRow(o))
                  )}
 
                  {kitchenSubTab === "ready" && (
-                   visibleOrders.filter((o: OrderReceipt) => o.status === "Ready").length === 0 ? (
+                   visibleOrders.filter((o: OrderReceipt) => o.status === "Ready" && !o.customer.isPickup).length === 0 ? (
                      <div className="py-12 text-center text-slate-400 font-medium italic bg-white rounded-xl border border-dashed border-slate-200">No orders currently ready.</div>
-                   ) : visibleOrders.filter((o: OrderReceipt) => o.status === "Ready").map(o => renderOrderRow(o))
+                   ) : visibleOrders.filter((o: OrderReceipt) => o.status === "Ready" && !o.customer.isPickup).map(o => renderOrderRow(o))
                  )}
+
 
                  {kitchenSubTab === "out_for_delivery" && (
                    visibleOrders.filter((o: OrderReceipt) => o.status === "Out for delivery").length === 0 ? (
@@ -1350,6 +1624,98 @@ export function KitchenPage({ user, onBack, showToast }: { user: AppUser | null,
         />
       ) : null;
     })()}
+    {/* Pickup PIN Verification Modal */}
+    {pickupPinModalOpen && (
+      <div className="fixed inset-0 z-[999] flex items-center justify-center">
+        <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => { if (!pickupPinSuccess) setPickupPinModalOpen(false); }} />
+        <div className="relative w-full max-w-md mx-4 bg-white rounded-3xl shadow-2xl p-8 space-y-6 animate-in zoom-in-95">
+          {pickupPinSuccess ? (
+            <div className="text-center py-8">
+              <div className="text-6xl mb-4">✅</div>
+              <h3 className="text-2xl font-black text-slate-900">Pickup Verified!</h3>
+              <p className="text-slate-500 font-medium mt-1">Order handed over successfully.</p>
+            </div>
+          ) : (
+            <>
+              <div className="text-center">
+                <div className="w-16 h-16 bg-slate-100 rounded-2xl flex items-center justify-center mx-auto mb-4">
+                  <span className="text-3xl">🔒</span>
+                </div>
+                <h3 className="text-xl font-black text-slate-900">Pickup PIN Verification</h3>
+                <p className="text-sm text-slate-500 font-medium mt-1">Ask the customer for their 4-digit pickup PIN</p>
+              </div>
+
+              <div className="flex justify-center gap-3 cursor-pointer" onClick={() => pickupPinInputRef.current?.focus()}>
+                {[0,1,2,3].map(i => (
+                  <div key={i} className={cn(
+                    "w-14 h-16 rounded-2xl border-2 flex items-center justify-center text-2xl font-black transition-all duration-200",
+                    pickupPinValue[i] ? "border-slate-950 bg-slate-950 text-white scale-105 shadow-xl" :
+                    pickupPinError ? "border-rose-500 bg-rose-50 text-rose-500" :
+                    "border-slate-200 bg-slate-50 text-slate-300"
+                  )}>
+                    {pickupPinValue[i] || "•"}
+                  </div>
+                ))}
+              </div>
+
+              <input
+                ref={pickupPinInputRef}
+                type="tel"
+                inputMode="numeric"
+                maxLength={4}
+                value={pickupPinValue}
+                onChange={e => {
+                  const val = e.target.value.replace(/\D/g, '').slice(0, 4);
+                  setPickupPinValue(val);
+                  setPickupPinError(false);
+                }}
+                className="opacity-0 absolute w-0 h-0"
+                autoFocus
+              />
+
+              {pickupPinError && (
+                <p className="text-center text-rose-600 font-bold text-sm">❌ Incorrect PIN. Try again.</p>
+              )}
+
+              <button
+                onClick={verifyPickupPin}
+                disabled={pickupPinValue.length < 4 || pickupPinVerifying}
+                className="w-full bg-slate-900 hover:bg-slate-800 disabled:bg-slate-300 text-white font-black text-sm uppercase tracking-widest py-4 rounded-2xl transition-all shadow-lg"
+              >
+                {pickupPinVerifying ? "Verifying..." : "Verify & Hand Over"}
+              </button>
+
+              {!pickupShowOverride ? (
+                <button
+                  onClick={() => setPickupShowOverride(true)}
+                  className="w-full text-slate-400 hover:text-rose-500 text-[10px] font-bold uppercase tracking-widest py-2 transition-colors"
+                >
+                  Customer can't provide PIN?
+                </button>
+              ) : (
+                <div className="p-4 bg-rose-50 rounded-2xl border border-rose-200 space-y-3">
+                  <p className="text-xs font-bold text-rose-700">⚠️ Override will be logged for accountability. Only use if the customer cannot provide their PIN.</p>
+                  <button
+                    onClick={overridePickupPin}
+                    disabled={pickupOverriding}
+                    className="w-full bg-rose-600 hover:bg-rose-700 disabled:bg-rose-300 text-white font-black text-xs uppercase tracking-widest py-3 rounded-xl transition-all"
+                  >
+                    {pickupOverriding ? "Processing..." : "Override & Hand Over"}
+                  </button>
+                </div>
+              )}
+
+              <button
+                onClick={() => setPickupPinModalOpen(false)}
+                className="w-full text-slate-400 hover:text-slate-600 text-xs font-bold py-2 transition-colors"
+              >
+                Cancel
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+    )}
     </>
   );
 }

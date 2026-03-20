@@ -1,9 +1,11 @@
-import { UtensilsCrossed, CalendarDays, Activity, TrendingUp, Package, RefreshCw, Plus } from "lucide-react";
+import React, { useState, useMemo } from "react";
+import { Package, RefreshCw, Plus } from "lucide-react";
 import { Button } from "../ui/Button";
 import { Card, CardContent } from "../ui/Card";
 import { Skeleton, SkeletonOrderCard } from "../ui/Skeleton";
 import { cn } from "../../lib/utils";
 import { formatDateIndia } from "../../lib/format";
+import { useAppSetting } from "../../hooks/useAppSettings";
 import type { AppUser, OrderReceipt } from "../../types";
 
 interface OrderHistoryProps {
@@ -16,22 +18,21 @@ interface OrderHistoryProps {
 }
 
 export function OrderHistory({ user, orders, setRoute, setRegularCart, showToast, isLoading = false }: OrderHistoryProps) {
+  const healthPreferencesEnabled = useAppSetting("enable_health_preferences", true);
+  const pickupEnabled = useAppSetting("enable_pickup", true);
+
+  const [activeTab, setActiveTab] = useState<"all" | "delivery" | "pickup">("all");
+
+  const filteredOrders = useMemo(() => {
+     if (activeTab === "all") return orders;
+     if (activeTab === "delivery") return orders.filter(o => !o.customer?.isPickup);
+     if (activeTab === "pickup") return orders.filter(o => o.customer?.isPickup);
+     return orders;
+  }, [orders, activeTab]);
+
   if (isLoading) {
     return (
       <>
-        {/* Stats bar skeleton */}
-        <Card className="border-slate-100 bg-gradient-to-br from-white to-slate-50/20">
-          <CardContent className="p-6">
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              {[1, 2, 3, 4].map(i => (
-                <div key={i} className="space-y-2">
-                  <Skeleton className="h-3 w-24" />
-                  <Skeleton className="h-8 w-16" />
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
         {/* Order card skeletons */}
         <div className="space-y-4">
           <div className="flex items-center justify-between px-1">
@@ -48,40 +49,40 @@ export function OrderHistory({ user, orders, setRoute, setRegularCart, showToast
 
   return (
     <>
-      <Card className="border-slate-100 bg-gradient-to-br from-white to-slate-50/20">
-        <CardContent className="p-6">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            {[
-              { label: "Lifetime Meals", val: orders.reduce((s,o) => s + (o.lines?.reduce((ls, l) => ls + l.qty, 0) || 0), 0), icon: <UtensilsCrossed size={16}/>, color: "text-slate-900" },
-              { label: "Health Points", val: user.healthScore || 850, icon: <Activity size={16}/>, color: "text-sky-600" },
-              { label: "Days Tracked", val: [...new Set(orders.map(o => new Date(o.createdAt).toDateString()))].length, icon: <CalendarDays size={16}/>, color: "text-violet-600" },
-              { label: "Est. Savings", val: "₹" + (orders.length * 45).toLocaleString(), icon: <TrendingUp size={16}/>, color: "text-amber-600" },
-            ].map(s => (
-              <div key={s.label} className="text-center md:text-left space-y-1">
-                <div className="flex items-center justify-center md:justify-start gap-1.5 text-[10px] font-black uppercase tracking-widest text-slate-400">
-                  {s.icon} {s.label}
-                </div>
-                <div className={cn("text-2xl font-black", s.color)}>{s.val}</div>
-              </div>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
 
       <div className="space-y-4">
-        <div className="flex items-center justify-between px-1">
-          <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest">Recent Orders</h3>
-          <span className="text-xs font-bold text-slate-400">{orders.length} total records</span>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-1">
+          <div className="flex items-center gap-3">
+            <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest">Recent Orders</h3>
+            <span className="text-xs font-bold text-slate-400">{filteredOrders.length} records</span>
+          </div>
+
+          {!pickupEnabled.loading && pickupEnabled.value && (
+            <div className="flex gap-1 p-1 bg-slate-100/80 rounded-xl">
+              {(["all", "delivery", "pickup"] as const).map(t => (
+                 <button 
+                    key={t}
+                    onClick={() => setActiveTab(t)}
+                    className={cn(
+                      "px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest rounded-lg transition-all", 
+                      activeTab === t ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700 hover:bg-black/5"
+                    )}
+                 >
+                   {t}
+                 </button>
+              ))}
+            </div>
+          )}
         </div>
 
-        {orders.length === 0 ? (
+        {filteredOrders.length === 0 ? (
           <div className="p-12 text-center rounded-3xl border-2 border-dashed border-slate-100 bg-white">
             <Package size={40} className="mx-auto text-slate-200 mb-3" />
-            <p className="text-slate-400 font-medium">No order history found.</p>
+            <p className="text-slate-400 font-medium">{orders.length > 0 ? `No ${activeTab} orders found.` : "No order history found."}</p>
             <Button variant="ghost" className="text-slate-900 mt-2" onClick={() => setRoute("home")}>Place your first order</Button>
           </div>
         ) : (
-          orders.map((o) => {
+          filteredOrders.map((o) => {
             const isToday = o.deliveryAtLabel === new Date().toISOString().slice(0, 10);
             const isSubscription = o.kind === 'personalized';
 
@@ -172,7 +173,7 @@ export function OrderHistory({ user, orders, setRoute, setRegularCart, showToast
                                     )}
                                     <div className="text-sm font-bold text-slate-800">{displayLabel}</div>
                                   </div>
-                                  {user.isPro && l.calories && (
+                                  {user.isPro && l.calories && (!healthPreferencesEnabled.loading && healthPreferencesEnabled.value) && (
                                     <div className="flex items-center gap-2 mt-0.5">
                                       <span className="text-[9px] font-black text-slate-600/70 border border-slate-200 bg-slate-50 px-1.5 rounded-md uppercase">{l.calories} kcal</span>
                                       <span className="text-[9px] font-black text-sky-600/70 border border-sky-100 bg-sky-50 px-1.5 rounded-md uppercase">{l.protein}g protein</span>

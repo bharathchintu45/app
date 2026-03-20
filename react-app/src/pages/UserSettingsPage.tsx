@@ -3,8 +3,9 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   User, Sparkles, Settings, LogOut,
   Package, Star, TrendingUp, Shield, AlertTriangle,
-  Clock, Zap, Check,
-  Bell, MapPin, Activity, ArrowRight, PlayCircle
+  Clock, Zap,
+  Bell, MapPin, Activity, ArrowRight,
+  Calendar
 } from "lucide-react";
 import { Button } from "../components/ui/Button";
 import { cn } from "../lib/utils";
@@ -14,7 +15,7 @@ import type { AppUser, Route, OrderReceipt } from "../types";
 import { ProfileForm } from "../components/profile/ProfileForm";
 import { AddressManager } from "../components/profile/AddressManager";
 import { OrderHistory } from "../components/profile/OrderHistory";
-import { SubscriptionManagement } from "../components/profile/SubscriptionManagement";
+import { formatDateIndia } from "../lib/format";
 
 type TabId = "profile" | "subscription" | "history" | "settings";
 
@@ -34,6 +35,8 @@ export function UserSettingsPage({
   const { value: rewardsEnabled } = useAppSetting("rewards_enabled", true);
   const { value: referralEnabled } = useAppSetting("referral_program_enabled", true);
   const [activeTab, setActiveTab] = useState<TabId>("profile");
+  const [activeSub, setActiveSub] = useState<any>(null);
+  const [isSubLoading, setIsSubLoading] = useState(true);
   const [orders, setOrders] = useState<OrderReceipt[]>([]);
   const [ordersLoading, setOrdersLoading] = useState(true);
 
@@ -45,21 +48,38 @@ export function UserSettingsPage({
   const fetchOrders = useCallback(async () => {
     if (!user?.id) { setOrdersLoading(false); return; }
     setOrdersLoading(true);
+    
+    // Fetch orders and items (limit 25 for performance)
     const { data: dbOrders, error } = await supabase
       .from('orders')
       .select('*, order_items(*)')
-      .eq('user_id', user?.id)
-      .order('created_at', { ascending: false });
+      .eq('user_id', user.id)
+      .order('created_at', { ascending: false })
+      .limit(25);
 
-    if (error || !dbOrders) { setOrdersLoading(false); return; }
+    if (error || !dbOrders) { 
+      console.error("[UserSettingsPage] Fetch orders error:", error);
+      setOrdersLoading(false); 
+      return; 
+    }
 
+    // Manual Join: Fetch menu items details for the orders shown
     const itemIds = new Set<string>();
-    dbOrders.forEach(o => { (o.order_items || []).forEach((i: any) => { if (i.menu_item_id) itemIds.add(i.menu_item_id); }); });
+    dbOrders.forEach(o => { 
+      (o.order_items || []).forEach((i: any) => { 
+        if (i.menu_item_id) itemIds.add(i.menu_item_id); 
+      }); 
+    });
 
     let menuItemsObj: Record<string, any> = {};
     if (itemIds.size > 0) {
-      const { data: menuData } = await supabase.from('menu_items').select('id, name, calories, protein').in('id', Array.from(itemIds));
-      if (menuData) { menuData.forEach(m => { menuItemsObj[m.id] = m; }); }
+      const { data: menuData } = await supabase
+        .from('menu_items')
+        .select('id, name, calories, protein, image_url')
+        .in('id', Array.from(itemIds));
+      if (menuData) { 
+        menuData.forEach(m => { menuItemsObj[m.id] = m; }); 
+      }
     }
 
     setOrders(dbOrders.map(dbOrder => ({
@@ -71,17 +91,73 @@ export function UserSettingsPage({
       customer: dbOrder.delivery_details || { receiverName: '', receiverPhone: '' },
       payment: dbOrder.payment_status,
       status: dbOrder.status as any,
-      priceSummary: { subtotal: dbOrder.subtotal, gst: dbOrder.gst_amount, gstRate: 0.05, deliveryFee: dbOrder.delivery_fee || 0, total: dbOrder.total },
+      priceSummary: { 
+        subtotal: dbOrder.subtotal, 
+        gst: dbOrder.gst_amount, 
+        gstRate: 0.05, 
+        deliveryFee: dbOrder.delivery_fee || 0, 
+        total: dbOrder.total 
+      },
       meta: dbOrder.meta || { durationDays: 30 },
       lines: (dbOrder.order_items || []).map((dbItem: any) => {
         const md = menuItemsObj[dbItem.menu_item_id];
-        return { itemId: dbItem.menu_item_id, label: dbItem.item_name || md?.name || "Item", qty: dbItem.quantity, unitPriceAtOrder: dbItem.unit_price, calories: md?.calories, protein: md?.protein };
+        return {
+          itemId: dbItem.menu_item_id,
+          label: dbItem.item_name || md?.name || "Item",
+          qty: dbItem.quantity,
+          unitPriceAtOrder: dbItem.unit_price,
+          calories: md?.calories,
+          protein: md?.protein,
+          image: md?.image_url
+        };
       })
     })));
     setOrdersLoading(false);
   }, [user?.id]);
 
-  useEffect(() => { fetchOrders(); }, [fetchOrders]);
+  const fetchActiveSub = useCallback(async () => {
+    if (!user?.id) return;
+    setIsSubLoading(true);
+    const { data, error } = await supabase
+      .from('subscriptions')
+      .select('*')
+      .eq('user_id', user.id)
+      .in('status', ['active', 'paused', 'pending'])
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (!error) setActiveSub(data);
+    setIsSubLoading(false);
+  }, [user?.id]);
+
+  useEffect(() => { 
+    fetchOrders();
+    fetchActiveSub();
+
+    if (!user?.id) return;
+    
+    const channel = supabase
+      .channel(`user_subscription_${user.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'subscriptions',
+          filter: `user_id=eq.${user.id}`
+        },
+        () => {
+          fetchActiveSub();
+          fetchOrders();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [user?.id, fetchOrders, fetchActiveSub]);
 
   // Active personalized subscription (the most recent one, regardless of status filter edge cases)
   const activePersonalizedOrder = useMemo(() => {
@@ -93,15 +169,26 @@ export function UserSettingsPage({
 
   const subscriptionStatus = useMemo(() => {
     if (!user) return null;
-    if (!activePersonalizedOrder) {
-      return user.isPro ? { active: null, daysLeft: 30, duration: 30, deliveriesDone: 0, progress: 0, isNew: true } : null;
+    if (!activeSub) return null;
+    
+    const startDateStr = activeSub.start_date || activeSub.delivery_date;
+    const duration = activeSub.duration_days || 30;
+    
+    const startTs = startDateStr ? new Date(startDateStr).getTime() : Date.now();
+    const nowTs = new Date().setHours(0,0,0,0);
+    const isNew = !startDateStr || (startTs > nowTs);
+    
+    if (isNew) {
+      return { active: activeSub, daysLeft: duration, duration, progress: 0, isNew: true, deliveriesDone: 0 };
     }
-    const daysPassed = Math.floor((Date.now() - activePersonalizedOrder.createdAt) / (1000 * 60 * 60 * 24));
-    const duration = activePersonalizedOrder.meta?.durationDays || 30;
-    const daysLeft = Math.max(0, duration - daysPassed);
-    const deliveriesDone = orders.filter(o => o.status === "Delivered").length;
-    return { active: activePersonalizedOrder, daysLeft, duration, deliveriesDone, progress: Math.min(100, Math.round((daysPassed / duration) * 100)), isNew: false };
-  }, [user, activePersonalizedOrder, orders]);
+    
+    const daysPassed = Math.max(0, Math.floor((nowTs - startTs) / (1000 * 60 * 60 * 24)));
+    const deliveriesDone = daysPassed + 1;
+    const daysLeft = Math.max(0, duration - deliveriesDone);
+    const progress = Math.min(100, Math.round((deliveriesDone / duration) * 100));
+    
+    return { active: activeSub, daysLeft, duration, progress, isNew, deliveriesDone };
+  }, [user, activeSub]);
 
   if (!user) { setRoute("home"); return null; }
 
@@ -134,11 +221,19 @@ export function UserSettingsPage({
 
   const pct = subscriptionStatus?.progress || 0;
   const daysLeft = subscriptionStatus?.daysLeft ?? 0;
-  const duration = subscriptionStatus?.duration || 30;
-  const meta = subscriptionStatus?.active?.meta;
 
   return (
     <div className="mx-auto max-w-4xl px-3 sm:px-4 py-6 md:py-10">
+      
+      {/* Back button */}
+      <div className="mb-6 px-2">
+        <button 
+          onClick={() => setRoute("home")} 
+          className="text-sm font-semibold text-black/60 hover:text-black transition-colors flex items-center gap-1.5"
+        >
+          ← Back to Home
+        </button>
+      </div>
 
       {/* ── HERO ── */}
       <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-950 via-slate-900 to-slate-800 text-white p-6 md:p-8 mb-6">
@@ -311,7 +406,7 @@ export function UserSettingsPage({
 
             {/* Sign out (mobile visible always) */}
             <button
-              onClick={() => { if (window.confirm("Sign out?")) { setUser(null); setRoute("home"); } }}
+              onClick={async () => { if (window.confirm("Sign out?")) { await supabase.auth.signOut(); setUser(null); setRoute("home"); } }}
               className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-2xl text-sm font-bold text-rose-600 border border-rose-100 bg-white hover:bg-rose-50 shadow-sm transition-all"
             >
               <LogOut size={15} /> Sign Out
@@ -321,127 +416,226 @@ export function UserSettingsPage({
 
         {/* ─── MY PLAN TAB ─── */}
         {activeTab === "subscription" && (
-          <motion.div key="subscription" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} className="space-y-5">
+          <motion.div key="subscription" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} className="space-y-6">
 
-            {/* Plan Hero Card */}
             {subscriptionStatus ? (
-              <div className="rounded-3xl overflow-hidden bg-gradient-to-br from-amber-50 to-white border border-amber-100 shadow-sm">
-                <div className="p-6 flex flex-col sm:flex-row items-center gap-6">
-                  {/* Ring */}
-                  <div className="relative shrink-0">
-                    <svg width="110" height="110" viewBox="0 0 110 110">
-                      <circle cx="55" cy="55" r="46" fill="none" stroke="#fef3c7" strokeWidth="9" />
-                      <motion.circle
-                        cx="55" cy="55" r="46" fill="none" stroke="#f59e0b"
-                        strokeWidth="9"
-                        strokeDasharray={`${2 * Math.PI * 46}`}
-                        initial={{ strokeDashoffset: 2 * Math.PI * 46 }}
-                        animate={{ strokeDashoffset: 2 * Math.PI * 46 * (1 - pct / 100) }}
-                        transition={{ duration: 1.2, ease: "easeOut" }}
-                        strokeLinecap="round" transform="rotate(-90 55 55)"
-                      />
-                    </svg>
-                    <div className="absolute inset-0 flex flex-col items-center justify-center">
-                      <span className="text-3xl font-black text-amber-600">{daysLeft}</span>
-                      <span className="text-[9px] font-bold text-slate-400 uppercase">days left</span>
-                    </div>
-                  </div>
+              <>
+                {(() => {
+                  const { daysLeft: dl, duration: dur, progress: subPct } = subscriptionStatus;
+                  const proPointsValue = proPoints;
+                  const streakValue = streak;
 
-                  <div className="flex-1 text-center sm:text-left">
-                    <div className={cn("inline-flex items-center gap-1.5 mb-2 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest border",
-                      subscriptionStatus.isNew ? "bg-sky-50 border-sky-200 text-sky-700" :
-                      (activePersonalizedOrder?.status as string) === 'paused' ? "bg-amber-100 border-amber-200 text-amber-800" :
-                      pct >= 100 ? "bg-slate-100 border-slate-200 text-slate-600" :
-                      "bg-emerald-50 border-emerald-200 text-emerald-700"
-                    )}>
-                      <Sparkles size={10} />
-                      {subscriptionStatus.isNew ? "New" : (activePersonalizedOrder?.status as string) === 'paused' ? "Paused" : pct >= 100 ? "Completed" : "Active"}
-                    </div>
-                    <h2 className="text-2xl font-black text-slate-900">{meta?.plan || `${duration}-Day Plan`}</h2>
-                    <div className="flex flex-wrap justify-center sm:justify-start gap-3 mt-2 text-xs text-slate-500 font-bold">
-                      <span className="flex items-center gap-1"><Clock size={11} />{duration} days</span>
-                      <span className="flex items-center gap-1"><Zap size={11} />{meta?.mealsPerDay || 2} meals/day</span>
-                      <span className="flex items-center gap-1"><TrendingUp size={11} />Day {Math.min((duration - daysLeft) + 1, duration)} of {duration}</span>
-                    </div>
-                    <div className="mt-4">
-                      <div className="flex justify-between text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5">
-                        <span>Progress</span><span className="text-amber-600">{pct}% complete</span>
-                      </div>
-                      <div className="h-2 bg-amber-50 rounded-full overflow-hidden">
-                        <motion.div initial={{ width: 0 }} animate={{ width: `${pct}%` }} transition={{ duration: 0.8 }} className="h-full bg-amber-400 rounded-full" />
-                      </div>
-                    </div>
-                  </div>
+                  return (
+                  <>
+                    {/* 1. STATUS CARD (PREMIUM) */}
+                    <div className="relative overflow-hidden rounded-[2.5rem] bg-slate-900 border border-slate-800 p-6 md:p-10 text-white shadow-2xl">
+                      {/* Backdrop decoration */}
+                      <div className="absolute top-0 right-0 w-64 h-64 bg-emerald-500/10 blur-[100px] -translate-y-1/2 translate-x-1/2 pointer-events-none" />
+                      <div className="absolute bottom-0 left-0 w-48 h-48 bg-sky-500/10 blur-[80px] translate-y-1/2 -translate-x-1/4 pointer-events-none" />
 
-                  <div className="hidden sm:block text-right shrink-0">
-                    <div className="text-2xl font-black text-slate-900">₹{totalSpent > 0 ? totalSpent.toLocaleString("en-IN") : "—"}</div>
-                    <div className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1">Lifetime Spent</div>
-                  </div>
-                </div>
+                      <div className="relative z-10 flex flex-col md:flex-row items-center gap-8 md:gap-12">
+                        {/* Radial Progress */}
+                        <div className="relative shrink-0">
+                          <svg width="140" height="140" viewBox="0 0 140 140" className="w-[120px] h-[120px] md:w-[140px] md:h-[140px]">
+                            <circle cx="70" cy="70" r="62" fill="none" stroke="rgba(255,255,255,0.05)" strokeWidth="10" />
+                            <motion.circle
+                              cx="70" cy="70" r="62" fill="none" stroke="#10b981"
+                              strokeWidth="10"
+                              strokeDasharray={`${2 * Math.PI * 62}`}
+                              initial={{ strokeDashoffset: 2 * Math.PI * 62 }}
+                              animate={{ strokeDashoffset: 2 * Math.PI * 62 * (1 - subPct / 100) }}
+                              transition={{ duration: 1.5, ease: "easeOut" }}
+                              strokeLinecap="round" transform="rotate(-90 70 70)"
+                            />
+                          </svg>
+                          <div className="absolute inset-0 flex flex-col items-center justify-center">
+                            <span className="text-3xl md:text-5xl font-black text-white">{dl}</span>
+                            <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Days Left</span>
+                          </div>
+                        </div>
+
+                        {/* Plan Info */}
+                        <div className="flex-1 text-center md:text-left space-y-4">
+                          <div className={cn(
+                            "inline-flex items-center gap-2 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest border mx-auto md:mx-0",
+                            activeSub.status === 'paused' 
+                              ? "bg-amber-500/10 border-amber-500/20 text-amber-400" 
+                              : "bg-emerald-500/10 border-emerald-500/20 text-emerald-400"
+                          )}>
+                            <div className={cn("w-1.5 h-1.5 rounded-full animate-pulse", activeSub.status === 'paused' ? "bg-amber-500" : "bg-emerald-500")} />
+                            {activeSub.status}
+                          </div>
+                          <h2 className="text-3xl md:text-4xl lg:text-5xl font-black tracking-tight leading-tight">{activeSub.plan_name || "Personalized Plan"}</h2>
+                          <p className="text-slate-400 text-sm md:text-base font-medium leading-relaxed max-w-sm mx-auto md:mx-0">
+                            Total {dur} days of fresh, nutritionist-planned meals delivered.
+                          </p>
+                          
+                          <div className="flex flex-wrap justify-center md:justify-start gap-4 md:gap-6 pt-2">
+                            <div className="flex items-center gap-2">
+                              <Clock size={16} className="text-slate-500" />
+                              <span className="text-xs md:text-sm font-bold text-slate-300">Started {formatDateIndia(activeSub.start_date || activeSub.delivery_date)}</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <Zap size={16} className="text-slate-500" />
+                              <span className="text-xs md:text-sm font-bold text-slate-300">{activeSub.meta?.mealsPerDay || 2} Meals / Day</span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* 2. STATS GRID */}
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                      {[
+                        { label: "Completion", value: `${subPct}%`, icon: Activity, color: "text-emerald-500", bg: "bg-emerald-500/5" },
+                        { label: "Deliveries Done", value: subscriptionStatus.deliveriesDone, icon: Package, color: "text-sky-500", bg: "bg-sky-500/5" },
+                        { label: "Pro Points", value: proPointsValue, icon: Star, color: "text-amber-500", bg: "bg-amber-500/5" },
+                        { label: "Streak", value: `${streakValue}🔥`, icon: TrendingUp, color: "text-rose-500", bg: "bg-rose-500/5" },
+                      ].map(stat => (
+                        <div key={stat.label} className="bg-white border border-slate-100 rounded-[1.75rem] p-5 shadow-sm hover:shadow-md transition-shadow">
+                          <div className={cn("w-10 h-10 rounded-2xl flex items-center justify-center mb-4", stat.bg)}>
+                            <stat.icon size={18} className={stat.color} />
+                          </div>
+                          <div className="text-2xl font-black text-slate-900">{stat.value}</div>
+                          <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">{stat.label}</div>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* 3. SCHEDULE SNAPSHOT (NEXT 3 DAYS) */}
+                    <div className="bg-white border border-slate-100 rounded-[2.5rem] p-6 md:p-8 shadow-sm">
+                      <div className="flex items-center justify-between mb-8">
+                        <div className="flex items-center gap-3">
+                          <div className="w-12 h-12 rounded-2xl bg-indigo-50 flex items-center justify-center text-indigo-600 border border-indigo-100/50">
+                            <Calendar size={22} />
+                          </div>
+                          <div>
+                            <h3 className="text-lg md:text-xl font-black text-slate-900">Upcoming Schedule</h3>
+                            <p className="text-xs text-slate-400 font-medium tracking-tight">Your next 3 days at a glance</p>
+                          </div>
+                        </div>
+                        <button onClick={() => setRoute("dashboard")} className="hidden sm:flex text-[10px] font-black uppercase tracking-widest px-5 py-2.5 bg-slate-100 text-slate-600 rounded-xl hover:bg-slate-900 hover:text-white transition-all items-center gap-2">
+                          Go to Planner <ArrowRight size={12} />
+                        </button>
+                      </div>
+
+                      <div className="grid gap-4">
+                        {(() => {
+                          const today = new Date().toISOString().split('T')[0];
+                          const sched = activeSub.schedule || [];
+                          // Get unique dates in the schedule which are >= today
+                          const uniqueDates = Array.from(new Set(sched.map((s: any) => s.day)))
+                            .filter((d: any) => d >= today)
+                            .sort()
+                            .slice(0, 3);
+
+                          if (uniqueDates.length === 0) {
+                            return (
+                              <div className="py-10 text-center bg-slate-50 rounded-[2rem] border border-dashed border-slate-200 w-full">
+                                <p className="text-sm text-slate-400 font-medium">No deliveries scheduled in the next 3 days.</p>
+                              </div>
+                            );
+                          }
+
+                          return uniqueDates.map((dateStr: any) => {
+                            const d = new Date(dateStr);
+                            const key = dateStr;
+                            const isToday = key === today;
+                            const dayItems = sched.filter((s: any) => s.day === key);
+                            const mealsCount = dayItems.length;
+                            const labels = dayItems.map((s: any) => s.label).join(", ");
+
+                            return (
+                              <div key={key} className={cn(
+                                "flex items-center gap-4 p-5 rounded-[2rem] border transition-all",
+                                isToday ? "bg-slate-50 border-slate-200 shadow-inner" : "bg-white border-slate-100 hover:border-slate-300"
+                              )}>
+                                <div className="w-14 h-14 rounded-2xl bg-white border border-slate-100 flex flex-col items-center justify-center shrink-0 shadow-sm">
+                                  <span className="text-[10px] font-black text-slate-400 uppercase leading-none mb-1">{d.toLocaleDateString("en-IN", { weekday: 'short' })}</span>
+                                  <span className="text-xl font-black text-slate-900 leading-none">{d.getDate()}</span>
+                                </div>
+                                
+                                <div className="flex-1 min-w-0">
+                                  <div className="text-[10px] font-black text-indigo-500 uppercase tracking-widest mb-1">{isToday ? "Next Delivery" : "Planned Delivery"}</div>
+                                  <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3">
+                                    <div className="flex -space-x-2 shrink-0">
+                                      {Array.from({ length: Math.min(3, mealsCount) }).map((_, i) => (
+                                        <div key={i} className="w-8 h-8 rounded-full bg-slate-200 border-2 border-white overflow-hidden shadow-sm">
+                                          <div className="w-full h-full bg-gradient-to-br from-slate-100 to-slate-200" />
+                                        </div>
+                                      ))}
+                                    </div>
+                                    <div className="min-w-0">
+                                      <div className="text-sm md:text-base font-bold text-slate-900 leading-tight">
+                                        {mealsCount} {mealsCount === 1 ? 'Meal' : 'Meals'} {isToday ? 'Today' : ''}
+                                      </div>
+                                      {labels && (
+                                        <div className="text-[10px] text-slate-400 font-medium truncate mt-0.5">
+                                          {labels}
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>
+
+                                <div className="hidden sm:flex items-center gap-2 py-1.5 px-3 rounded-full bg-slate-100 text-[10px] font-black text-slate-500 uppercase tracking-widest border border-slate-200">
+                                  <Zap size={10} className="text-amber-500" /> {activeSub.meta?.plan || "Pro"}
+                                </div>
+                              </div>
+                            );
+                          });
+                        })()}
+                      </div>
+                    </div>
+                  </>
+                  );
+                })()}
+
+                {/* 4. MANAGEMENT ACTIONS - Removed as requested */}
+              </>
+            ) :
+            isSubLoading ? (
+              <div className="py-40 flex flex-col items-center justify-center space-y-6">
+                <div className="w-12 h-12 border-4 border-slate-200 border-t-slate-900 rounded-full animate-spin" />
+                <p className="text-xs text-slate-400 font-black uppercase tracking-[0.2em]">Loading your nutrition plan...</p>
               </div>
             ) : (
               /* No plan — upgrade card */
-              <div className="rounded-3xl overflow-hidden bg-gradient-to-br from-slate-950 to-slate-900 p-8 text-white">
-                <div className="flex items-center gap-3 mb-5">
-                  <div className="w-10 h-10 rounded-xl bg-amber-400/10 flex items-center justify-center"><Sparkles size={20} className="text-amber-400" /></div>
-                  <div className="text-[10px] font-black uppercase tracking-widest text-amber-400">The Fit Bowls PRO</div>
-                </div>
-                <h2 className="text-3xl font-black tracking-tight mb-3">Unlock Premium Nutrition</h2>
-                <p className="text-slate-400 mb-6 max-w-md leading-relaxed">Advanced macro visualizers, priority kitchen queuing, and monthly health score reports.</p>
-                <div className="grid gap-2.5 sm:grid-cols-2 mb-6">
-                  {["Advanced Macro Analytics", "Priority Kitchen Queuing", "Monthly Health Report", "Exclusive Pro Recipes", "Unlimited Holds & Pauses", "Personal Nutri-Chat"].map(f => (
-                    <div key={f} className="flex items-center gap-2.5 text-sm font-semibold text-slate-300">
-                      <div className="w-5 h-5 rounded-full bg-emerald-500/20 flex items-center justify-center shrink-0"><Check size={10} className="text-emerald-400" strokeWidth={3} /></div>
-                      {f}
-                    </div>
-                  ))}
-                </div>
-                <Button size="lg" onClick={() => setRoute("home")} className="h-14 px-10 bg-amber-400 text-slate-900 hover:bg-amber-300 font-black shadow-xl">
-                  Get a Personalized Plan <ArrowRight size={18} className="ml-2" />
-                </Button>
-              </div>
-            )}
-
-            {/* Nutrition Journey sample chart */}
-            <div className="rounded-2xl border border-slate-100 bg-white p-5">
-              <div className="flex items-center gap-3 mb-4">
-                <div className="w-9 h-9 rounded-xl bg-emerald-100 flex items-center justify-center"><TrendingUp size={16} className="text-emerald-600" /></div>
-                <div>
-                  <div className="text-sm font-black text-slate-900">Nutrition Journey</div>
-                  <div className="text-xs text-slate-400">Sample data — real tracking coming soon</div>
-                </div>
-              </div>
-              <div className="flex items-end gap-2 h-20">
-                {[65, 80, 45, 90, 70, 85, 60].map((h, i) => (
-                  <div key={i} className="flex-1 flex flex-col items-center gap-1">
-                    <motion.div
-                      initial={{ height: 0 }} animate={{ height: `${h}%` }}
-                      transition={{ delay: i * 0.07, duration: 0.5, ease: "easeOut" }}
-                      className={cn("w-full rounded-t-lg", i === 6 ? "bg-emerald-400" : "bg-slate-100")}
-                    />
-                    <div className="text-[9px] text-slate-400 font-bold">{["M","T","W","T","F","S","S"][i]}</div>
+              <div className="rounded-[3rem] overflow-hidden bg-gradient-to-br from-slate-950 to-slate-900 p-8 sm:p-12 text-white relative shadow-2xl">
+                <div className="absolute top-0 right-0 w-96 h-96 bg-amber-400/5 blur-[120px] -translate-y-1/2 translate-x-1/2 pointer-events-none" />
+                
+                <div className="relative z-10 flex flex-col items-center text-center space-y-8">
+                  <div className="w-16 h-16 md:w-20 md:h-20 rounded-[2rem] bg-amber-400/10 flex items-center justify-center text-amber-400 border border-amber-400/20 shadow-lg shadow-amber-900/20">
+                    <Sparkles size={32} />
                   </div>
-                ))}
+                  <div className="space-y-3">
+                    <h2 className="text-3xl md:text-6xl font-black tracking-tighter">Personalized Nutrition</h2>
+                    <p className="text-slate-400 text-sm md:text-xl max-w-xl mx-auto leading-relaxed font-medium">
+                      Fuel your goals with nutritionist-planned meals, advanced tracking, and priority service.
+                    </p>
+                  </div>
+                  
+                  <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 md:gap-4 w-full max-w-3xl py-8">
+                    {[
+                      { icon: Activity, text: "Macro Analytics" },
+                      { icon: Zap, text: "Priority Queuing" },
+                      { icon: Clock, text: "Flexible Delivery" },
+                      { icon: Star, text: "Exclusive Recipes" },
+                      { icon: Shield, text: "Unlimited Holds" },
+                      { icon: Activity, text: "Nutritionist Chat" }
+                    ].map((f, i) => (
+                      <div key={i} className="bg-white/5 border border-white/10 rounded-[1.5rem] p-5 flex flex-col items-center gap-3 hover:bg-white/10 transition-colors group">
+                        <f.icon size={20} className="text-amber-400 transition-transform group-hover:scale-110" />
+                        <span className="text-[10px] font-black uppercase tracking-widest text-slate-300">{f.text}</span>
+                      </div>
+                    ))}
+                  </div>
+
+                  <Button size="lg" onClick={() => setRoute("home")} className="h-16 md:h-20 px-8 md:px-14 bg-amber-400 text-slate-900 hover:bg-amber-300 font-black shadow-2xl shadow-amber-900/40 rounded-[2rem] text-sm md:text-xl transform hover:scale-105 transition-all">
+                    Build My Custom Plan <ArrowRight size={24} className="ml-3" />
+                  </Button>
+                </div>
               </div>
-              <div className="mt-2 text-[9px] text-slate-300 font-bold text-center uppercase tracking-widest">Sample Data</div>
-            </div>
-
-            {/* Subscription management — pass prefetched order to avoid re-fetch mismatch */}
-            <SubscriptionManagement
-              user={user}
-              onUpdate={fetchOrders}
-              showToast={showToast}
-              prefetchedOrder={activePersonalizedOrder}
-            />
-
-            {/* Go to dashboard button */}
-            {subscriptionStatus && (
-              <button
-                onClick={() => setRoute("dashboard")}
-                className="w-full flex items-center justify-center gap-2 py-3.5 rounded-2xl bg-slate-900 text-white text-sm font-black hover:bg-black transition-all shadow-lg"
-              >
-                <PlayCircle size={16} /> Open Meal Dashboard
-              </button>
             )}
           </motion.div>
         )}
@@ -449,18 +643,6 @@ export function UserSettingsPage({
         {/* ─── ORDERS TAB ─── */}
         {activeTab === "history" && (
           <motion.div key="history" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} className="space-y-5">
-            <div className="grid grid-cols-3 gap-3">
-              {[
-                { label: "Total Orders",  value: totalOrders,   color: "bg-sky-50 border-sky-100 text-sky-600" },
-                { label: "Delivered",     value: subscriptionStatus?.deliveriesDone || 0, color: "bg-emerald-50 border-emerald-100 text-emerald-600" },
-                { label: "Total Spent",   value: `₹${totalSpent > 0 ? (totalSpent / 1000).toFixed(1) + "k" : "0"}`, color: "bg-indigo-50 border-indigo-100 text-indigo-600" },
-              ].map(s => (
-                <div key={s.label} className={cn("rounded-2xl border p-4 text-center", s.color)}>
-                  <div className="text-xl font-black">{s.value}</div>
-                  <div className="text-[10px] font-bold uppercase tracking-widest opacity-70 mt-0.5">{s.label}</div>
-                </div>
-              ))}
-            </div>
             <OrderHistory user={user} orders={orders} setRoute={setRoute} setRegularCart={setRegularCart} isLoading={ordersLoading} showToast={showToast} />
           </motion.div>
         )}
@@ -545,7 +727,7 @@ export function UserSettingsPage({
                     <div className="text-xs text-slate-400">Log out of your account on this device</div>
                   </div>
                   <Button variant="outline" size="sm" className="border-rose-200 text-rose-600 hover:bg-rose-50 shrink-0"
-                    onClick={() => { if (window.confirm("Sign out?")) { setUser(null); setRoute("home"); } }}>
+                    onClick={async () => { if (window.confirm("Sign out?")) { await supabase.auth.signOut(); setUser(null); setRoute("home"); } }}>
                     <LogOut size={13} className="mr-1.5" /> Sign Out
                   </Button>
                 </div>

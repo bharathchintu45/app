@@ -4,6 +4,7 @@ import type { AppUser, AuthIntent, DashboardTab, Route } from "../../types";
 import { Menu, X } from "lucide-react";
 import { Button } from "../ui/Button";
 import { cn } from "../../lib/utils";
+import { supabase } from "../../lib/supabase";
 import { motion, AnimatePresence } from "framer-motion";
 
 export function TopNav({
@@ -11,6 +12,8 @@ export function TopNav({
   setRoute,
   user,
   setUser,
+  dashboardTab,
+  setDashboardTab,
   setAuthOpen,
   setAuthIntent,
   unreadChefMessages = 0,
@@ -36,9 +39,12 @@ export function TopNav({
     { label: "Home", route: "home" as Route },
   ];
 
-  function handleAuthClick() {
+  async function handleAuthClick() {
     if (user) {
-      if (window.confirm("Sign out?")) setUser(null);
+      if (window.confirm("Sign out?")) {
+        await supabase.auth.signOut();
+        setUser(null);
+      }
     } else {
       setAuthIntent("regular");  // customers → Email OTP flow
       setAuthOpen(true);
@@ -47,13 +53,15 @@ export function TopNav({
 
   function NavItems({ isMobile }: { isMobile?: boolean }) {
     const linkClass = (isActive: boolean) => cn(
-      "text-sm font-medium transition-colors hover:text-black flex items-center gap-1.5",
-      isActive ? "text-black font-bold" : "text-slate-600",
-      isMobile ? "text-lg py-2 w-full justify-center" : ""
+      "text-sm font-bold transition-all duration-300 flex items-center gap-1.5 px-4 py-2 rounded-full",
+      isActive 
+        ? "text-slate-900 bg-slate-100 shadow-sm ring-1 ring-black/5" 
+        : "text-slate-500 hover:text-black hover:bg-slate-50",
+      isMobile ? "text-lg py-3 w-full justify-center" : ""
     );
 
     return (
-      <>
+      <div className={cn("flex items-center gap-1", isMobile && "flex-col w-full")}>
         {navLinks.map((link) => (
           <button
             key={link.route}
@@ -66,122 +74,130 @@ export function TopNav({
             {link.label}
           </button>
         ))}
-        {user ? (
-          <div className={cn(
-            "flex items-center gap-1", 
-            (enablePersonalizedSubscriptions.value || true) && !isMobile ? "bg-slate-100/80 rounded-full p-1" : "flex-col md:flex-row gap-4 md:gap-8"
-          )}>
-            {enablePersonalizedSubscriptions.value && (
+        {user && (
+          <>
+            {user.role === "delivery" ? (
               <button
-                onClick={() => {
-                  setRoute("app");
-                  setMobileMenuOpen(false);
-                }}
-                className={cn(
-                  linkClass(route === "app"),
-                  !isMobile && "px-3 py-1.5 rounded-full",
-                  !isMobile && route === "app" && "bg-white shadow-sm"
-                )}
+                onClick={() => { setRoute("delivery"); setMobileMenuOpen(false); }}
+                className={linkClass(route === "delivery")}
               >
-                Plan Builder
+                🛵 My Deliveries
               </button>
-            )}
-            {hasActiveSubscription && (
-              <button
-                onClick={() => {
-                  setRoute("dashboard");
-                  setMobileMenuOpen(false);
-                }}
-                className={cn(
-                  linkClass(route === "dashboard"),
-                  !isMobile && "px-3 py-1.5 rounded-full font-bold",
-                  (!isMobile && route === "dashboard") 
-                    ? "bg-emerald-100 text-emerald-700 shadow-sm ring-1 ring-emerald-500/20"
-                    : !isMobile ? "text-slate-600 hover:bg-slate-200" : ""
+            ) : (
+              <>
+                {enablePersonalizedSubscriptions.value && (
+                  <button
+                    onClick={() => {
+                      setDashboardTab("personal");
+                      setRoute("app");
+                      setMobileMenuOpen(false);
+                    }}
+                    className={linkClass(route === "app")}
+                  >
+                    Plan Builder
+                  </button>
                 )}
-              >
-                Dashboard
-                {unreadChefMessages > 0 && (
-                  <span className="bg-rose-500 text-white text-[10px] w-4 h-4 rounded-full flex items-center justify-center shrink-0 ml-1.5">
-                    {unreadChefMessages}
-                  </span>
+                {hasActiveSubscription && (
+                  <button
+                    onClick={() => {
+                      setDashboardTab("personal");
+                      setRoute("dashboard");
+                      setMobileMenuOpen(false);
+                    }}
+                    className={linkClass(route === "dashboard")}
+                  >
+                    Dashboard
+                    {unreadChefMessages > 0 && (
+                      <span className={cn(
+                        "w-4 h-4 rounded-full flex items-center justify-center shrink-0 ml-1.5 text-[10px]",
+                        route === "dashboard" ? "bg-slate-900 text-white" : "bg-rose-500 text-white"
+                      )}>
+                        {unreadChefMessages}
+                      </span>
+                    )}
+                  </button>
                 )}
-              </button>
+                
+                <button
+                  onClick={() => {
+                    setRoute("orders");
+                    setMobileMenuOpen(false);
+                  }}
+                  className={linkClass(route === "orders")}
+                >
+                  My Orders
+                </button>
+                <button
+                  onClick={() => {
+                    setRoute("profile");
+                    setMobileMenuOpen(false);
+                  }}
+                  className={linkClass(route === "profile")}
+                >
+                  Profile
+                </button>
+              </>
             )}
-            
-            {!isMobile && (enablePersonalizedSubscriptions.value || true) && (
-              <div className="w-px h-4 bg-slate-300 mx-2" />
-            )}
-
-            <button
-              onClick={() => {
-                setRoute("orders");
-                setMobileMenuOpen(false);
-              }}
-              className={linkClass(route === "orders")}
-            >
-              My Orders
-            </button>
-            <button
-              onClick={() => {
-                setRoute("profile");
-                setMobileMenuOpen(false);
-              }}
-              className={linkClass(route === "profile")}
-            >
-              Profile
-            </button>
-          </div>
-        ) : null}
-      </>
+          </>
+        )}
+      </div>
     );
   }
 
   return (
     <>
-      <header className="sticky top-0 z-40 w-full border-b border-slate-200/50 bg-white/80 backdrop-blur-xl">
-        <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
-          <button className="flex items-center gap-2.5 transition-transform hover:scale-105 active:scale-95" onClick={() => setRoute("home")} type="button">
-            <div className="rounded-xl bg-[#111] text-white px-4 py-1.5 font-bold tracking-wide text-sm shadow-sm">
-              TFB
-            </div>
-          </button>
-
-          {/* Desktop Nav */}
-          <nav className="hidden md:flex items-center gap-8">
-            <NavItems />
-            <div className="h-4 w-px bg-slate-200" />
-            {!user && (
-              <Button
-                variant="primary"
-                size="sm"
-                onClick={handleAuthClick}
-              >
-                Sign In
-              </Button>
-            )}
-          </nav>
-
-          {/* Mobile Menu Toggle */}
-          <div className="flex md:hidden items-center gap-4">
-            {!user && (
-              <Button
-                variant="primary"
-                size="sm"
-                onClick={handleAuthClick}
-              >
-                Sign In
-              </Button>
-            )}
-            <button
-              onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-              className="text-slate-600 hover:text-black transition-colors p-1"
+      <div className="fixed top-4 left-0 right-0 z-50 px-4 md:px-8 pointer-events-none">
+        <header className="mx-auto max-w-5xl pointer-events-auto">
+          <div className="flex h-14 items-center justify-between px-4 rounded-3xl border border-white/40 bg-white/70 backdrop-blur-2xl shadow-[0_8px_32px_rgba(0,0,0,0.06)] ring-1 ring-black/[0.03]">
+            <button 
+              className="group flex items-center gap-2 transition-all hover:opacity-80 active:scale-95 px-3 py-1.5 rounded-2xl" 
+              onClick={() => setRoute("home")} 
+              type="button"
             >
-              {mobileMenuOpen ? <X size={24} /> : <Menu size={24} />}
+              <div className="font-black tracking-tighter text-xl bg-clip-text text-transparent bg-gradient-to-br from-slate-900 via-slate-700 to-slate-500">
+                TFB
+              </div>
             </button>
+
+            {/* Desktop Nav */}
+            <nav className="hidden md:flex items-center gap-6">
+              <NavItems />
+              {!user && (
+                <Button
+                  variant="primary"
+                  size="sm"
+                  className="rounded-full px-5 h-9 bg-slate-900 text-white hover:shadow-lg hover:shadow-slate-900/20 active:translate-y-0.5 transition-all"
+                  onClick={handleAuthClick}
+                >
+                  Sign In
+                </Button>
+              )}
+            </nav>
+
+            {/* Mobile Menu Toggle */}
+            <div className="flex md:hidden items-center gap-2">
+              {!user && (
+                <Button
+                  variant="primary"
+                  size="sm"
+                  className="rounded-full px-4 h-8 text-xs font-bold"
+                  onClick={handleAuthClick}
+                >
+                  Sign In
+                </Button>
+              )}
+              <button
+                onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+                className="w-10 h-10 flex items-center justify-center rounded-full text-slate-600 hover:text-black hover:bg-slate-100 transition-all"
+              >
+                {mobileMenuOpen ? <X size={20} /> : <Menu size={20} />}
+              </button>
+            </div>
           </div>
-        </div>
-      </header>
+        </header>
+      </div>
+
+      <div className="h-20" /> {/* Spacer for fixed header */}
 
       {/* Mobile Nav Overlay */}
       <AnimatePresence>
@@ -193,7 +209,7 @@ export function TopNav({
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               onClick={() => setMobileMenuOpen(false)}
-              className="fixed inset-0 z-40 bg-black/20 backdrop-blur-sm md:hidden"
+              className="fixed inset-0 z-[60] bg-black/10 backdrop-blur-sm md:hidden"
             />
             
             {/* Drawer */}
@@ -202,25 +218,26 @@ export function TopNav({
               animate={{ x: 0 }}
               exit={{ x: "100%" }}
               transition={{ type: "spring", damping: 25, stiffness: 200 }}
-              className="fixed right-0 top-0 z-50 h-full w-72 border-l border-slate-200 bg-white shadow-2xl md:hidden"
+              className="fixed right-4 top-20 bottom-4 z-[70] w-[calc(100%-2rem)] max-w-xs rounded-3xl border border-white/40 bg-white/90 backdrop-blur-xl shadow-2xl md:hidden overflow-hidden"
             >
-              <div className="flex h-16 items-center justify-end px-4 border-b border-slate-100">
+              <div className="flex h-14 items-center justify-between px-6 border-b border-black/[0.03]">
+                <div className="font-black text-slate-400 text-sm tracking-widest uppercase">Navigation</div>
                 <button
                   onClick={() => setMobileMenuOpen(false)}
-                  className="p-2 text-slate-600 hover:text-black transition-colors"
+                  className="w-8 h-8 flex items-center justify-center rounded-full bg-slate-100 text-slate-600 hover:text-black transition-colors"
                 >
-                  <X size={24} />
+                  <X size={18} />
                 </button>
               </div>
-              <nav className="flex flex-col gap-4 p-6 overflow-y-auto">
+              <nav className="flex flex-col gap-2 p-4 overflow-y-auto max-h-[calc(100%-120px)]">
                 <NavItems isMobile={true} />
               </nav>
               
-              <div className="absolute bottom-8 left-0 right-0 px-6">
+              <div className="absolute bottom-6 left-6 right-6">
                 {!user ? (
                   <Button
                     variant="primary"
-                    className="w-full"
+                    className="w-full rounded-2xl h-12 shadow-lg shadow-slate-900/10"
                     onClick={() => {
                       handleAuthClick();
                       setMobileMenuOpen(false);
@@ -231,9 +248,10 @@ export function TopNav({
                 ) : (
                   <Button
                     variant="outline"
-                    className="w-full border-rose-200 text-rose-600 hover:bg-rose-50"
-                    onClick={() => {
+                    className="w-full rounded-2xl h-12 border-rose-100 text-rose-500 hover:bg-rose-50 hover:border-rose-200 bg-white"
+                    onClick={async () => {
                       if (window.confirm("Sign out?")) {
+                        await supabase.auth.signOut();
                         setUser(null);
                         setMobileMenuOpen(false);
                       }

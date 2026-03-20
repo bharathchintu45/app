@@ -1,10 +1,13 @@
 import { Card, CardHeader, CardContent } from "../ui/Card";
+import { supabase } from "../../lib/supabase";
+import { useEffect, useState } from "react";
 import { Button } from "../ui/Button";
 import { SectionTitle } from "../ui/Typography";
 import { Sparkles, Bike, CalendarDays, Lock, Unlock, ArrowRight, Sun, Coffee, Moon, ChefHat, Clock } from "lucide-react";
 import { formatDateIndia, slotLabel, dayKey, addDays, parseDateKeyToDate } from "../../lib/format";
 import { sumMacros } from "../../data/menu";
 import { cn } from "../../lib/utils";
+
 
 import type { OrderReceipt, Slot, PlanMap, HoldsMap, MenuItem } from "../../types";
 
@@ -39,6 +42,50 @@ export function ActiveSubscriptionDashboard({
 }) {
   const now = new Date();
   const currentHour = now.getHours();
+
+
+  const [dateOrders, setDateOrders] = useState<any[]>([]);
+
+  useEffect(() => {
+    if (!subscription?.user_id || !selectedDate) return;
+
+    let isMounted = true;
+    async function fetchDateOrders() {
+      const { data, error } = await supabase
+        .from("orders")
+        .select("*, order_items(*)")
+        .eq("user_id", subscription.user_id)
+        .eq("delivery_date", selectedDate)
+        .neq("status", "cancelled");
+
+      if (!error && data && isMounted) {
+        setDateOrders(data);
+      }
+    }
+
+    fetchDateOrders();
+
+    return () => { isMounted = false; };
+  }, [subscription?.user_id, selectedDate]);
+
+  const getSlotStatus = (slotSymbol: Slot) => {
+    // Map slot to order item label convention (e.g. "[Breakfast]", "[Lunch]", "[Dinner]")
+    const labelMatch = 
+      slotSymbol === "Slot1" ? "[Breakfast]" : 
+      slotSymbol === "Slot2" ? "[Lunch]" : 
+      "[Dinner]";
+
+    // Find if we have an order in dateOrders that has this slot
+    for (const order of dateOrders) {
+      if (order.kind === 'personalized' || order.kind === 'subscription') {
+        const hasSlot = order.order_items?.some((item: any) => 
+          item.item_name && item.item_name.includes(labelMatch)
+        );
+        if (hasSlot) return order.status; // 'pending', 'preparing', 'ready', 'out_for_delivery', 'delivered'
+      }
+    }
+    return null;
+  };
 
   const isLocked = (dateKey: string) => {
     if (dateKey < todayKey) return true;
@@ -92,7 +139,7 @@ export function ActiveSubscriptionDashboard({
     
   const startDateStrFormatted = formatDateIndia(startDateMs);
     
-  const mealLabel = mealsPerDay === 1 ? "Lunch Only" : mealsPerDay === 2 ? "2 Meals / Day" : "3 Meals / Day";
+  const mealLabel = plan.title || (mealsPerDay === 1 ? "1 Meal / Day" : mealsPerDay === 2 ? "2 Meals / Day" : "3 Meals / Day");
   const isFallback = !subscription.id; 
 
   return (
@@ -161,8 +208,9 @@ export function ActiveSubscriptionDashboard({
             )}
           </div>
           
-            <div className="w-full sm:w-[300px] lg:w-[320px] flex flex-col items-center gap-4 sm:gap-5 p-6 sm:p-7 md:p-9 rounded-[2.5rem] md:rounded-[3rem] bg-white/5 backdrop-blur-2xl border border-white/20 shadow-2xl shadow-black/40">
-               <div className="space-y-0.5 sm:space-y-1 text-center">
+          <div className="w-full sm:w-[300px] lg:w-[320px] flex flex-col items-center gap-4 sm:gap-5 p-6 sm:p-7 md:p-9 rounded-[2.5rem] md:rounded-[3rem] bg-white/5 backdrop-blur-2xl border border-white/20 shadow-2xl shadow-black/40">
+             <div className="space-y-4 sm:space-y-6 text-center w-full">
+               <div className="space-y-2">
                  <div className="text-[8px] sm:text-[10px] font-black uppercase tracking-normal sm:tracking-[0.2em] text-slate-500">Selected Day Macros</div>
                  {(() => {
                     const activeMeals = plan.allowedSlots
@@ -171,40 +219,76 @@ export function ActiveSubscriptionDashboard({
                       .filter(Boolean) as MenuItem[];
                     
                     const values = sumMacros(activeMeals);
+                    const targets = subscription?.meta?.targets || { calories: 2000, protein: 150, carbs: 200, fat: 70 };
+                    
+                    const calPct = Math.round((values.calories / targets.calories) * 100);
+                    const calBarPct = Math.min(100, calPct);
+                    const isCalExtreme = calPct >= 110;
                     
                     return (
-                      <>
-                        <div className="text-xl sm:text-2xl md:text-4xl font-black text-white leading-none">
-                          {values.calories}<span className="text-emerald-400 text-[10px] sm:text-xs ml-0.5 tracking-tighter">kcal</span>
+                      <div className="flex flex-col gap-4 sm:gap-6">
+                        {/* Calories Progress */}
+                        <div className="space-y-2">
+                          <div className="text-xl sm:text-2xl md:text-5xl font-black text-white leading-none transition-all duration-300">
+                            {values.calories}<span className={cn("text-[10px] sm:text-sm ml-1 tracking-tight font-bold", isCalExtreme ? "text-rose-500" : "text-emerald-400")}>kcal / {targets.calories}</span>
+                          </div>
+                          <div className="relative w-full h-2 sm:h-3 bg-white/5 rounded-full overflow-hidden border border-white/10">
+                            <div 
+                              className={cn(
+                                "absolute inset-y-0 left-0 transition-all duration-1000 ease-out rounded-full",
+                                isCalExtreme ? "bg-rose-500 shadow-[0_0_15px_rgba(244,63,94,0.6)]" : "bg-emerald-500 shadow-[0_0_15px_rgba(16,185,129,0.4)]"
+                              )}
+                              style={{ width: `${calBarPct}%` }}
+                            />
+                            {calPct > 100 && (
+                              <div className="absolute inset-y-0 left-0 bg-white/20 animate-pulse" style={{ width: `${calBarPct}%` }} />
+                            )}
+                          </div>
+                          <div className={cn("text-[9px] font-black uppercase tracking-widest", isCalExtreme ? "text-rose-400" : "text-slate-500")}>
+                            {calPct}% of daily goal
+                          </div>
                         </div>
-                        <div className="flex gap-4 sm:gap-6 items-end mt-4 justify-center">
+
+                        {/* Macro Grid */}
+                        <div className="flex gap-4 sm:gap-8 items-end justify-center">
                           {[
-                            { label: 'P', val: values.protein, target: subscription?.meta?.targets?.protein || 150 },
-                            { label: 'C', val: values.carbs, target: subscription?.meta?.targets?.carbs || 200 },
-                            { label: 'F', val: values.fat, target: subscription?.meta?.targets?.fat || 70 }
+                            { label: 'Protein', short: 'P', val: values.protein, target: targets.protein, color: 'emerald', glow: 'rgba(16,185,129,0.5)' },
+                            { label: 'Carbs',   short: 'C', val: values.carbs,   target: targets.carbs,   color: 'sky',     glow: 'rgba(14,165,233,0.5)' },
+                            { label: 'Fat',     short: 'F', val: values.fat,     target: targets.fat,     color: 'amber',   glow: 'rgba(245,158,11,0.5)' }
                           ].map((m) => {
                             const pct = m.target > 0 ? Math.round((m.val / m.target) * 100) : 0;
                             const barPct = Math.min(100, pct);
+                            const extreme = pct >= 120;
+                            
                             return (
-                              <div key={m.label} className="flex flex-col items-center gap-1.5 sm:gap-2">
-                                  <div className="text-[8px] font-black text-emerald-400/80 mb-0.5">{pct}%</div>
-                                  <div className="w-2 sm:w-3 h-10 sm:h-14 md:h-20 bg-white/10 rounded-full relative overflow-hidden ring-1 ring-white/5">
+                              <div key={m.short} className="flex flex-col items-center gap-2 group transition-transform hover:scale-105">
+                                  <div className={cn("text-[9px] font-black transition-colors duration-300", extreme ? "text-rose-400" : "text-emerald-400/80")}>{pct}%</div>
+                                  <div className="w-2 sm:w-3.5 h-12 sm:h-20 md:h-28 bg-white/5 rounded-full relative overflow-hidden ring-1 ring-white/10">
                                     <div 
-                                      className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-emerald-600 to-emerald-400 shadow-[0_0_15px_rgba(16,185,129,0.5)] transition-all duration-1000 ease-out" 
-                                      style={{ height: `${barPct}%` }} 
+                                      className={cn(
+                                        "absolute bottom-0 left-0 right-0 transition-all duration-1000 ease-out",
+                                        extreme ? "bg-rose-500" : `bg-${m.color}-500`
+                                      )}
+                                      style={{ height: `${barPct}%`, boxShadow: extreme ? `0 0 15px rgba(244,63,94,0.6)` : `0 0 15px ${m.glow}` }} 
                                     />
                                   </div>
-                                 <div className="text-[8px] sm:text-[10px] font-black text-slate-500 uppercase tracking-tighter">{m.label}</div>
+                                 <div className="text-[8px] sm:text-[10px] font-black text-slate-500 uppercase tracking-tighter">{m.short}</div>
+                                 <div className={cn("text-[8px] font-bold whitespace-nowrap", extreme ? "text-rose-400" : "text-slate-400")}>
+                                   {m.val}<span className="opacity-40 font-medium">/{m.target}g</span>
+                                 </div>
                               </div>
                             );
                           })}
                         </div>
-                      </>
+                      </div>
                     );
                  })()}
                </div>
-               <div className="text-[8px] sm:text-[10px] font-bold text-slate-400 uppercase tracking-normal sm:tracking-widest">Macro Balance</div>
-            </div>
+               <div className="pt-2 sm:pt-4 border-t border-white/5 w-full">
+                 <div className="text-[8px] sm:text-[10px] font-bold text-slate-500 uppercase tracking-normal sm:tracking-widest">Macro Balance Performance</div>
+               </div>
+             </div>
+          </div>
         </div>
       </div>
 
@@ -228,6 +312,8 @@ export function ActiveSubscriptionDashboard({
                 const held = holds[dk]?.day;
                 const dp = planMap[dk] || {};
                 const mealCount = plan.allowedSlots.filter((s: Slot) => !!dp[s]).length;
+                const isPast = dk < todayKey;
+                const isCompleted = isPast; // We can expand this later if needed
 
                 return (
                   <button
@@ -237,7 +323,9 @@ export function ActiveSubscriptionDashboard({
                       "flex-shrink-0 relative w-12 sm:w-14 md:w-20 h-16 sm:h-20 md:h-28 rounded-xl sm:rounded-2xl md:rounded-3xl border-2 transition-all duration-300 flex flex-col items-center justify-center gap-0.5 sm:gap-1 group",
                       isSelected 
                         ? "bg-slate-900 border-slate-900 text-white shadow-xl shadow-slate-900/20 scale-105" 
-                        : "bg-white border-slate-100 hover:border-slate-300 text-slate-600 hover:bg-slate-50",
+                        : isCompleted
+                          ? "bg-white border-emerald-500 text-slate-600 hover:bg-emerald-50/30"
+                          : "bg-white border-slate-100 hover:border-slate-300 text-slate-600 hover:bg-slate-50",
                       held && !isSelected && "bg-rose-50 border-rose-200 text-rose-700"
                     )}
                   >
@@ -246,6 +334,12 @@ export function ActiveSubscriptionDashboard({
                     <div className="mt-1">
                       {held ? (
                         <Lock size={10} className={isSelected ? "text-emerald-400" : "text-rose-500"} />
+                      ) : isCompleted ? (
+                        <div className="bg-emerald-500 text-white rounded-full p-0.5">
+                          <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={4}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                          </svg>
+                        </div>
                       ) : (
                         <div className="flex gap-0.5">
                           {Array.from({length: plan.allowedSlots.length}).map((_, i) => (
@@ -254,7 +348,7 @@ export function ActiveSubscriptionDashboard({
                         </div>
                       )}
                     </div>
-                    {isDayLocked && <div className="absolute -top-1 -right-1 p-1 rounded-full bg-slate-900 text-white shadow-lg border border-white/20"><Lock size={8} /></div>}
+                    {isDayLocked && !isCompleted && <div className="absolute -top-1 -right-1 p-1 rounded-full bg-slate-900 text-white shadow-lg border border-white/20"><Lock size={8} /></div>}
                   </button>
                 );
               })}
@@ -267,18 +361,38 @@ export function ActiveSubscriptionDashboard({
             <CardHeader className="bg-slate-50/50 px-4 py-4 md:px-8 md:py-6 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                <div className="min-w-0">
                   <h3 className="text-lg md:text-xl font-bold text-slate-900 truncate">{formatDateIndia(selectedDate)}</h3>
-                  {isLocked(selectedDate) ? (
-                    <div className="flex items-center gap-1.5 mt-1 sm:mt-0.5 flex-wrap">
-                      <Lock size={12} className="text-slate-400 shrink-0" />
-                      <span className="text-[9px] sm:text-[10px] font-bold text-slate-400 uppercase tracking-wide">Locked for Preparation</span>
-                    </div>
-                  ) : (
-                    <div className="flex items-center gap-1.5 mt-1 sm:mt-0.5 flex-wrap">
-                      <Unlock size={12} className="text-emerald-500 shrink-0" />
-                      <span className="text-[9px] sm:text-[10px] font-bold text-emerald-500 uppercase tracking-wide">Modifications Open</span>
+                  {(() => {
+                    const activeSlotsForDay = plan.allowedSlots.filter((s: Slot) => !selectedDayHold.day && !selectedDayHold.slots[s]);
+                    const allDelivered = activeSlotsForDay.length > 0 && activeSlotsForDay.every((s: Slot) => getSlotStatus(s) === 'delivered');
+                    
+                    if (allDelivered) {
+                      return (
+                        <div className="flex items-center gap-1.5 mt-1 sm:mt-0.5 flex-wrap">
+                          <div className="bg-emerald-100 text-emerald-600 rounded-full p-0.5 shrink-0">
+                            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                            </svg>
+                          </div>
+                          <span className="text-[9px] sm:text-[10px] font-bold text-emerald-600 uppercase tracking-wide">Delivered</span>
+                        </div>
+                      );
+                    }
+                    if (isLocked(selectedDate)) {
+                      return (
+                        <div className="flex items-center gap-1.5 mt-1 sm:mt-0.5 flex-wrap">
+                          <Lock size={12} className="text-slate-400 shrink-0" />
+                          <span className="text-[9px] sm:text-[10px] font-bold text-slate-400 uppercase tracking-wide">Locked for Preparation</span>
+                        </div>
+                      );
+                    }
+                    return (
+                      <div className="flex items-center gap-1.5 mt-1 sm:mt-0.5 flex-wrap">
+                        <Unlock size={12} className="text-emerald-500 shrink-0" />
+                        <span className="text-[9px] sm:text-[10px] font-bold text-emerald-500 uppercase tracking-wide">Modifications Open</span>
 
-                    </div>
-                  )}
+                      </div>
+                    );
+                  })()}
                </div>
                
                {!isLocked(selectedDate) && (
@@ -319,6 +433,15 @@ export function ActiveSubscriptionDashboard({
                           alt={item?.name || "No meal"}
                           className="w-full h-full object-cover"
                         />
+                        {getSlotStatus(s) === 'delivered' && (
+                          <div className="absolute inset-0 bg-emerald-500/20 backdrop-blur-[1px] flex items-center justify-center">
+                            <div className="bg-white/90 rounded-full p-1.5 shadow-lg border border-emerald-100">
+                              <svg className="w-4 h-4 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={4}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                              </svg>
+                            </div>
+                          </div>
+                        )}
                       </div>
                       
                       <div className="flex-1 min-w-0">
@@ -368,8 +491,21 @@ export function ActiveSubscriptionDashboard({
                     )}
                     {locked && (
                       <div className="flex items-center gap-2 px-3 pb-3 md:px-6 md:pb-6 border-t border-slate-100 pt-2.5">
-                        <Lock size={12} className="text-slate-400 shrink-0" />
-                        <span className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Locked for Preparation</span>
+                        {getSlotStatus(s) === 'delivered' ? (
+                          <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-emerald-50 border border-emerald-100 w-full justify-center">
+                            <div className="bg-emerald-500 text-white rounded-full p-0.5 shrink-0 shadow-sm shadow-emerald-200">
+                               <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={4}>
+                                 <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                               </svg>
+                             </div>
+                            <span className="text-[10px] font-black uppercase tracking-widest text-emerald-700">Meal Delivered</span>
+                          </div>
+                        ) : (
+                          <>
+                            <Lock size={12} className="text-slate-400 shrink-0" />
+                            <span className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Locked for Preparation</span>
+                          </>
+                        )}
                       </div>
                     )}
                   </div>
@@ -403,7 +539,7 @@ export function ActiveSubscriptionDashboard({
                   <div>
                     <div className="flex justify-between items-center mb-2">
                       <span className="text-[9px] sm:text-[10px] font-black uppercase tracking-normal sm:tracking-widest text-slate-400">Progress</span>
-                      <span className={`text-[10px] sm:text-xs font-black ${daysLeft > 0 ? "text-emerald-600" : "text-rose-500"}`}>
+                      <span className={cn("text-[10px] sm:text-xs font-black", daysLeft > 0 ? "text-emerald-600" : "text-rose-500")}>
                         {daysLeft > 0 ? `${daysLeft}d left` : "Expired"}
                       </span>
                     </div>

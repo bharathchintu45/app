@@ -17,41 +17,34 @@ serve(async (req) => {
     }
 
     const supabase = createClient(supabaseUrl, supabaseKey);
-    const { orderId } = await req.json();
+    const { subscriptionId } = await req.json();
 
-    if (!orderId) {
-      throw new Error("Missing orderId in request body");
+    if (!subscriptionId) {
+      throw new Error("Missing subscriptionId in request body");
     }
 
-    console.log(`[Welcome Subscription] Fetching details for Order: ${orderId}...`);
+    console.log(`[Welcome Subscription] Fetching details for Subscription: ${subscriptionId}...`);
 
-    // 1. Fetch the order details
-    const { data: order, error: fetchErr } = await supabase
-      .from("orders")
-      .select("*, order_items(*)")
-      .eq("id", orderId)
+    // 1. Fetch the subscription details
+    const { data: subscription, error: fetchErr } = await supabase
+      .from("subscriptions")
+      .select("*")
+      .eq("id", subscriptionId)
       .single();
 
-    if (fetchErr || !order) {
-      throw new Error(`Order not found or fetch error: ${fetchErr?.message}`);
+    if (fetchErr || !subscription) {
+      throw new Error(`Subscription not found or fetch error: ${fetchErr?.message}`);
     }
 
-    if (order.kind !== 'personalized') {
-      return new Response(JSON.stringify({ message: "Order is not a personalized subscription, skipping email." }), { headers: { "Content-Type": "application/json" } });
-    }
-
-    const { delivery_date, customer_name, meta, user_id, order_number } = order;
+    const { start_date, end_date, customer_name, meta, user_id, duration_days, schedule, plan_type } = subscription;
+    const order_number = meta?.orderNumber || "N/A";
     
-    // Parse Meta
-    const durationDays = meta?.durationDays || 0;
-    const mealsPerDay = meta?.mealsPerDay || 0;
-    const scheduleLines = meta?.scheduleLines || [];
-
-    // Calculate End Date
-    const startDate = new Date(delivery_date);
-    const endDate = new Date(startDate);
-    endDate.setDate(startDate.getDate() + durationDays);
-    const endDateString = endDate.toISOString().slice(0, 10);
+    // Format variables for email
+    const durationDays = duration_days || 0;
+    const mealsPerDay = plan_type ? plan_type.split('+').length : 0;
+    const scheduleLines = schedule || [];
+    const delivery_date = start_date;
+    const endDateString = end_date;
 
     // 2. Fetch User Email
     const { data: userData } = await supabase.auth.admin.getUserById(user_id);

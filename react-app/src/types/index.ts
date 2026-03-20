@@ -17,7 +17,7 @@ export interface MenuItem {
 }
 
 export type Slot = "Slot1" | "Slot2" | "Slot3";
-export type PlanType = "breakfast" | "lunch" | "dinner" | "lunch-dinner" | "complete";
+export type PlanType = "breakfast" | "lunch" | "dinner" | "breakfast-lunch" | "lunch-dinner" | "breakfast-dinner" | "complete";
 export type Duration = 7 | 15 | 30;
 
 export interface PlanConfig {
@@ -36,9 +36,12 @@ export interface DeliveryDetails {
   area: string;
   addressLabel: string; // Save as
   instructions?: string;
+  lat?: number;
+  lng?: number;
+  isPickup?: boolean;
 }
 
-export type UserRole = "customer" | "admin" | "kitchen";
+export type UserRole = "customer" | "admin" | "kitchen" | "delivery";
 
 export interface AppUser {
   id?: string;
@@ -54,10 +57,10 @@ export interface AppUser {
   healthScore?: number;
 }
 
-export type Route = "home" | "login" | "checkout-regular" | "checkout-personal" | "checkout-group" | "order-confirmation" | "app" | "dashboard" | "admin" | "kitchen" | "profile" | "orders";
+export type Route = "home" | "login" | "checkout-regular" | "checkout-personal" | "checkout-group" | "order-confirmation" | "app" | "dashboard" | "admin" | "kitchen" | "delivery" | "profile" | "orders" | "404";
 
 export type DashboardTab = "personal" | "group";
-export type AuthIntent = "none" | "regular" | "personal" | "group" | "admin" | "kitchen";
+export type AuthIntent = "none" | "regular" | "personal" | "group" | "admin" | "kitchen" | "delivery";
 
 export interface Macros {
   calories: number;

@@ -54,6 +54,39 @@ export function useOrderNotifications(
   useEffect(() => {
     if (!user?.id) return;
 
+    // --- Delivery boy: subscribe to new assignments ---
+    if (user.role === "delivery") {
+      // First fetch the delivery_boy record to get the ID
+      let channel: any;
+      (async () => {
+        const { data: dbRow } = await import("../lib/supabase").then(m => 
+          m.supabase.from("delivery_boys").select("id").eq("profile_id", user.id).maybeSingle()
+        );
+        if (!dbRow?.id) return;
+
+        const { supabase } = await import("../lib/supabase");
+        channel = supabase
+          .channel(`delivery-notify-${user.id}`)
+          .on("postgres_changes", {
+            event: "INSERT",
+            schema: "public",
+            table: "delivery_assignments",
+            filter: `delivery_boy_id=eq.${dbRow.id}`,
+          }, () => {
+            showToast("🛵 New delivery assigned! Check your portal.");
+            showBrowserNotification("New Delivery Assignment", "You have a new delivery to complete.");
+          })
+          .subscribe();
+      })();
+
+      return () => {
+        if (channel) {
+          import("../lib/supabase").then(m => m.supabase.removeChannel(channel));
+        }
+      };
+    }
+
+    // --- Customer: subscribe to order status updates ---
     const channel = supabase
       .channel(`order-notifications-${user.id}`)
       .on(
@@ -97,5 +130,6 @@ export function useOrderNotifications(
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [user?.id]);
+  }, [user?.id, user?.role]);
 }
+

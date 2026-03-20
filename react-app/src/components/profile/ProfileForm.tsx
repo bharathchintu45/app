@@ -6,6 +6,7 @@ import { Input } from "../ui/Input";
 import { SectionTitle } from "../ui/Typography";
 import { supabase } from "../../lib/supabase";
 import { cn } from "../../lib/utils";
+import { useAppSetting } from "../../hooks/useAppSettings";
 import type { AppUser, DeliveryDetails } from "../../types";
 
 interface ProfileFormProps {
@@ -38,6 +39,7 @@ export function ProfileForm({ user, setUser }: ProfileFormProps) {
   });
 
   // Health preferences (local state until we add DB columns)
+  const healthPreferencesEnabled = useAppSetting("enable_health_preferences", true);
   const [selectedGoal, setSelectedGoal]   = useState<string | null>(null);
   const [selectedDiets, setSelectedDiets] = useState<string[]>([]);
 
@@ -170,6 +172,7 @@ export function ProfileForm({ user, setUser }: ProfileFormProps) {
       </Card>
 
       {/* ─── Health Preferences Card ─── */}
+      {!healthPreferencesEnabled.loading && healthPreferencesEnabled.value && (
       <Card className="overflow-hidden border-slate-100 shadow-sm">
         <CardHeader className="bg-slate-50/50 border-b border-slate-100 py-5 px-5 md:px-8">
           <SectionTitle icon={Target} title="Health Preferences" subtitle="Help us personalise your meal plan." />
@@ -238,6 +241,7 @@ export function ProfileForm({ user, setUser }: ProfileFormProps) {
           )}
         </CardContent>
       </Card>
+      )}
     </>
   );
 }

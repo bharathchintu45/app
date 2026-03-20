@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect, useRef } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 import type { AppUser, Route, DashboardTab, Cat, MenuItem, GroupCart, GroupOrderDraft, PlanMap, HoldsMap, StartDateMap, TargetMap, Slot, ThreadMsg } from "../types";
 import { buildPlanFromSubscription, sumMacros, prunePlanMapToAllowed } from "../data/menu";
 import { useMenu } from "../hooks/useMenu";
@@ -82,9 +83,26 @@ export function DashboardPage({
     : builderStartKey;
     
   const startDate = useMemo(() => parseDateKeyToDate(startKey), [startKey]);
+  const dates = useMemo(() => {
+    const duration = (viewMode === "tracking" && activeSubscription?.meta?.durationDays) 
+      ? activeSubscription.meta.durationDays 
+      : plan.duration;
+    return Array.from({ length: duration }, (_, i) => dayKey(addDays(startDate, i)));
+  }, [plan.duration, startDate, viewMode, activeSubscription]);
 
-  const [selectedDate, setSelectedDate] = useState(() => startKey);
-  useEffect(() => { setSelectedDate(startKey); }, [startKey]);
+  const initialDate = useMemo(() => {
+    if (viewMode !== "tracking" || !dates.length) return startKey;
+    const today = dayKey(new Date());
+    // If today is within our plan dates, default to it
+    if (dates.includes(today)) return today;
+    // Otherwise if we haven't started yet, default to first day
+    if (dates[0] > today) return dates[0];
+    // If we've finished, default to last day
+    return dates[dates.length - 1];
+  }, [viewMode, dates, startKey]);
+
+  const [selectedDate, setSelectedDate] = useState(initialDate);
+  useEffect(() => { setSelectedDate(initialDate); }, [initialDate]);
   useEffect(() => { setPlanMap((prev) => prunePlanMapToAllowed(prev, plan.allowedSlots)); }, [plan.allowedSlots, setPlanMap]);
 
   const selectedDayPlan = planMap[selectedDate] || {};
@@ -124,6 +142,23 @@ export function DashboardPage({
   const [modalItem, setModalItem] = useState<MenuItem | null>(null);
   const [swapSlot, setSwapSlot] = useState<{ slot: Slot, date: string } | null>(null);
 
+  const [showSubWarning, setShowSubWarning] = useState(false);
+  useEffect(() => {
+    if (viewMode === "planner" && dashboardTab !== "group" && activeSubscription && activeSubscription.status === "active") {
+      setShowSubWarning(true);
+    }
+  }, [viewMode, activeSubscription, dashboardTab]);
+
+  // Isolated state for "Explore Mode"
+  const [explorePlanMap, setExplorePlanMap] = useState<PlanMap>({});
+  const [exploreHolds, setExploreHolds] = useState<HoldsMap>({});
+
+  const isExploring = viewMode === "planner" && activeSubscription && activeSubscription.status === "active";
+  const currentPlanMap = isExploring ? explorePlanMap : planMap;
+  const currentSetPlanMap = isExploring ? setExplorePlanMap : setPlanMap;
+  const currentHolds = isExploring ? exploreHolds : holds;
+  const currentSetHolds = isExploring ? setExploreHolds : setHolds;
+
   async function handleSwapComplete(item: MenuItem) {
     if (!swapSlot || !activeSubscription) return;
     
@@ -157,7 +192,7 @@ export function DashboardPage({
 
   function toggleSlotItem(dateKey: string, slot: Slot, item: MenuItem) {
     if (item.available === false) return;
-    setPlanMap((prev) => {
+    currentSetPlanMap((prev) => {
       const cur = prev[dateKey] || {};
       const currentItem = cur[slot];
       const nextForSlot = (currentItem as MenuItem | null | undefined)?.id === item.id ? null : item;
@@ -168,7 +203,7 @@ export function DashboardPage({
   function copyToNextDay() {
     const nextDate = dayKey(addDays(parseDateKeyToDate(selectedDate), 1));
     if (!dates.includes(nextDate)) return showToast("End of plan reached.");
-    setPlanMap((prev) => ({ ...prev, [nextDate]: { ...prev[selectedDate] } }));
+    currentSetPlanMap((prev) => ({ ...prev, [nextDate]: { ...prev[selectedDate] } }));
     setSelectedDate(nextDate);
   }
 
@@ -176,7 +211,7 @@ export function DashboardPage({
     if (!window.confirm("Copy today's selection to ALL future days in this plan?")) return;
     const idx = dates.indexOf(selectedDate);
     const future = dates.slice(idx + 1);
-    setPlanMap((prev) => {
+    currentSetPlanMap((prev) => {
       const next = { ...prev };
       for (const d of future) next[d] = { ...prev[selectedDate] };
       return next;
@@ -186,16 +221,16 @@ export function DashboardPage({
 
   async function toggleHold(dateKey: string, which: "day" | Slot) {
     // Compute next state optimistically
-    const cur = holds[dateKey] || { day: false, slots: {} as Record<Slot, boolean> };
-    const next = { ...holds };
+    const cur = currentHolds[dateKey] || { day: false, slots: {} as Record<Slot, boolean> };
+    const next = { ...currentHolds };
     if (which === "day") next[dateKey] = { ...cur, day: !cur.day };
     else next[dateKey] = { ...cur, slots: { ...cur.slots, [which]: !cur.slots[which] } };
     
     // Optimistic UI update
-    setHolds(next);
+    currentSetHolds(next);
 
-    if (!activeSubscription) {
-      // Allow local hold state while building a plan, but skip DB sync if no sub yet
+    if (!activeSubscription || viewMode === "planner") {
+      // Allow local hold state while building a plan, but skip DB sync if no sub yet or if just exploring
       return;
     }
       
@@ -218,7 +253,7 @@ export function DashboardPage({
     if (error) {
       console.error("[Hold] Error:", error);
       // Roll back optimistic update
-      setHolds(holds);
+      currentSetHolds(holds);
       showToast(`Hold failed: ${error.message}`);
     }
   }
@@ -241,13 +276,6 @@ export function DashboardPage({
   }, [plan.allowedSlots.length]);
 
   const targets = useMemo(() => targetMap[subscription] || defaultTargets, [defaultTargets, subscription, targetMap]);
-  const dates = useMemo(() => {
-    // If tracking an active sub, use its strict duration
-    const duration = (viewMode === "tracking" && activeSubscription?.meta?.durationDays) 
-      ? activeSubscription.meta.durationDays 
-      : plan.duration;
-    return Array.from({ length: duration }, (_, i) => dayKey(addDays(startDate, i)));
-  }, [plan.duration, startDate, viewMode, activeSubscription]);
 
   const scrollContainerRef = useRef<HTMLDivElement>(null);
 
@@ -273,13 +301,13 @@ export function DashboardPage({
           </div>
         </div>
         <div className="flex flex-col items-end gap-3">
-          <button onClick={() => setRoute("home")} className="text-sm font-semibold text-black/60 hover:text-black transition-colors">
+          <button onClick={() => setRoute("home")} className="text-sm font-semibold text-black/60 hover:text-black transition-colors flex items-center gap-1.5">
             ← Back to Home
           </button>
         </div>
       </div>
       
-      {isSubLoading ? (
+      {isSubLoading && viewMode === "tracking" ? (
         <SkeletonDashboard />
       ) : dashboardTab === "group" ? (
         <GroupOrderView
@@ -302,8 +330,8 @@ export function DashboardPage({
                 todayKey={todayKey}
                 todayOrder={todayOrder}
                 onSwapMeal={(slot: Slot, date: string) => setSwapSlot({ slot, date })}
-                planMap={planMap}
-                holds={holds}
+                planMap={currentPlanMap}
+                holds={currentHolds}
                 toggleHold={toggleHold}
                 cutoffHour={cutoffSetting.value}
                 dates={dates}
@@ -368,8 +396,8 @@ export function DashboardPage({
                targets={targets}
                setTargetMap={setTargetMap}
                dates={dates}
-               planMap={planMap}
-               holds={holds}
+               planMap={currentPlanMap}
+               holds={currentHolds}
                selectedDate={selectedDate}
                setSelectedDate={setSelectedDate}
                todaysHold={todaysHold}
@@ -390,7 +418,7 @@ export function DashboardPage({
                slotSelectedTag={slotSelectedTag}
                setSlotSelectedTag={setSlotSelectedTag}
                availableSlotTags={availableSlotTags}
-               showToast={showToast}
+               hasActiveSubscription={!!(activeSubscription && activeSubscription.status === "active")}
              />
           )}
 
@@ -416,6 +444,44 @@ export function DashboardPage({
         onSwap={handleSwapComplete}
       />
     )}
+    <AnimatePresence>
+      {showSubWarning && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.95 }}
+            className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-xl"
+          >
+            <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-orange-100">
+              <span className="text-3xl">⚠️</span>
+            </div>
+            <h3 className="mb-2 text-center text-xl font-black text-slate-900 leading-tight">Active Subscription Found</h3>
+            <p className="mb-6 text-center text-sm font-medium text-slate-500 leading-relaxed">
+              You already have an active meal plan. Do you want to modify your upcoming deliveries instead?
+            </p>
+            <div className="flex flex-col gap-2.5">
+              <button
+                onClick={() => { setShowSubWarning(false); setRoute("dashboard"); }}
+                className="w-full rounded-xl bg-orange-500 py-3.5 text-sm font-bold text-white shadow-sm transition-all hover:bg-orange-600 hover:shadow"
+              >
+                Go to Dashboard
+              </button>
+              <button
+                onClick={() => {
+                  setExplorePlanMap({});
+                  setExploreHolds({});
+                  setShowSubWarning(false);
+                }}
+                className="w-full rounded-xl border-2 border-slate-100 py-3 text-sm font-bold text-slate-500 transition-colors hover:bg-slate-50 hover:text-slate-700"
+              >
+                Explore Plan Builder
+              </button>
+            </div>
+          </motion.div>
+        </div>
+      )}
+    </AnimatePresence>
     </>
   );
 }

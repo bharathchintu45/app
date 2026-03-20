@@ -58,17 +58,15 @@ serve(async (req) => {
     // 2. Iterate over each active subscription and generate daily delivery orders
     for (const sub of activeSubscriptions) {
 
-      // Skip if a delivery order already exists for this subscription + date
+      // Find existing auto-generated orders for this sub today
       const { data: existingOrders } = await supabase
         .from('orders')
-        .select('id')
+        .select('id, meta')
         .eq('delivery_date', targetStr)
-        .filter('meta->>subscription_id', 'eq', sub.id);
+        .filter('meta->>subscription_id', 'eq', sub.id)
+        .filter('meta->>is_auto_generated', 'eq', 'true');
 
-      if (existingOrders && existingOrders.length > 0) {
-        results.push({ subscriptionId: sub.id, status: "skipped_already_exists" });
-        continue;
-      }
+      const existingSlots = new Set((existingOrders || []).map(o => o.meta?.slot));
 
       // Skip if the user has a hold/pause for this date
       const { data: holds } = await supabase
@@ -83,7 +81,6 @@ serve(async (req) => {
       }
 
       // Find schedule lines for today
-      // schedule is a JSONB array: [{day: "2026-03-16", slot: "Breakfast", itemId, label, qty}]
       const scheduleLines: any[] = sub.schedule || [];
       const dayLines = scheduleLines.filter((l: any) =>
         (l.day === targetStr || l.day === targetDayName) && l.qty > 0
@@ -93,6 +90,14 @@ serve(async (req) => {
         results.push({ subscriptionId: sub.id, status: "skipped_no_meals_scheduled", targetStr, targetDayName });
         continue;
       }
+
+      // Group lines by slot
+      const linesBySlot: Record<string, any[]> = {};
+      dayLines.forEach((line: any) => {
+        const slot = line.slot || 'Meal';
+        if (!linesBySlot[slot]) linesBySlot[slot] = [];
+        linesBySlot[slot].push(line);
+      });
 
       // Fetch any meal swaps for this subscription on this date
       const { data: swaps } = await supabase
@@ -105,71 +110,85 @@ serve(async (req) => {
         swapMenuItems = fetchedItems || [];
       }
 
-      // Resolve order items for today (applying swaps if they exist)
-      const orderItemsPayload = dayLines.map((line: any) => {
-        const slotPrefix = line.slot ? `[${line.slot}] ` : '';
-        const swap = swaps?.find((s: any) => s.slot === line.slot);
-        if (swap) {
-          const menuItem = swapMenuItems.find((m: any) => m.id === swap.menu_item_id);
-          return {
-            menu_item_id: swap.menu_item_id,
-            item_name: `${slotPrefix}${menuItem?.name || 'Swapped Item'}`,
-            quantity: line.qty,
-            unit_price: menuItem?.price || line.unitPriceAtOrder || 0
-          };
-        }
-        return {
-          menu_item_id: line.itemId,
-          item_name: `${slotPrefix}${line.label}`,
-          quantity: line.qty,
-          unit_price: line.unitPriceAtOrder || 0
-        };
-      });
+      let subGeneratedAtLeastOne = false;
+      let subHasErrors = false;
 
-      // Create the daily delivery order in the orders table
-      const orderNumber = `SUB-${Math.floor(Math.random() * 900000) + 100000}`;
-      const deliveryDetails = sub.delivery_details || {
-        receiverName: sub.customer_name || "Subscription Customer",
-        receiverPhone: ""
-      };
+      const canonicalOrderNum = sub.meta?.orderNumber || (sub as any).order_number || `SUB-${sub.id.slice(-6).toUpperCase()}`;
 
-      const { data: insertedOrder, error: insOrdErr } = await supabase
-        .from('orders')
-        .insert({
-          user_id: sub.user_id,
-          order_number: orderNumber,
-          customer_name: sub.customer_name || deliveryDetails.receiverName,
-          delivery_details: deliveryDetails,
-          payment_status: "paid",
-          subtotal: 0,
-          total: 0,
-          gst_amount: 0,
-          kind: "personalized",
-          status: "pending",
-          delivery_date: targetStr,
-          meta: {
-            subscription_id: sub.id,    // links back to subscriptions table
-            is_auto_generated: true,
-            generated_at: new Date().toISOString(),
-          }
-        })
-        .select('id')
-        .single();
+      for (const [slot, itemsForSlot] of Object.entries(linesBySlot)) {
+         if (existingSlots.has(slot)) continue;
 
-      if (insOrdErr || !insertedOrder) {
-        console.error(`Failed to create order for sub ${sub.id}:`, insOrdErr);
-        results.push({ subscriptionId: sub.id, status: "error_creating_order", error: insOrdErr?.message });
-        continue;
+         const orderItemsPayload = itemsForSlot.map((line: any) => {
+           const slotPrefix = `[${slot}] `;
+           const swap = swaps?.find((s: any) => s.slot === slot);
+           if (swap) {
+             const menuItem = swapMenuItems.find((m: any) => m.id === swap.menu_item_id);
+             return {
+               menu_item_id: swap.menu_item_id,
+               item_name: `${slotPrefix}${menuItem?.name || 'Swapped Item'}`,
+               quantity: line.qty,
+               unit_price: menuItem?.price || line.unitPriceAtOrder || 0
+             };
+           }
+           return {
+             menu_item_id: line.itemId,
+             item_name: `${slotPrefix}${line.label}`,
+             quantity: line.qty,
+             unit_price: line.unitPriceAtOrder || 0
+           };
+         });
+
+         const orderNumber = `${canonicalOrderNum}-${slot}`;
+         const deliveryDetails = sub.delivery_details || { receiverName: sub.customer_name || "Subscription Customer", receiverPhone: "" };
+
+         const { data: insertedOrder, error: insOrdErr } = await supabase
+           .from('orders')
+           .insert({
+             user_id: sub.user_id,
+             order_number: orderNumber,
+             customer_name: sub.customer_name || deliveryDetails.receiverName,
+             delivery_details: deliveryDetails,
+             payment_status: "paid",
+             subtotal: 0,
+             total: 0,
+             gst_amount: 0,
+             kind: "personalized",
+             status: "pending",
+             delivery_date: targetStr,
+             meta: {
+               subscription_id: sub.id,
+               is_auto_generated: true,
+               generated_at: new Date().toISOString(),
+               orderNumber: canonicalOrderNum,
+               slot: slot
+             }
+           })
+           .select('id')
+           .single();
+
+         if (insOrdErr || !insertedOrder) {
+           console.error(`Failed to create order for sub ${sub.id} slot ${slot}:`, insOrdErr);
+           subHasErrors = true;
+           continue;
+         }
+
+         const itemsToInsert = orderItemsPayload.map((item: any) => ({ order_id: insertedOrder.id, ...item }));
+         const { error: insItemsErr } = await supabase.from('order_items').insert(itemsToInsert);
+
+         if (insItemsErr) {
+           console.error(`Failed to insert items for order ${insertedOrder.id}:`, insItemsErr);
+           subHasErrors = true;
+         } else {
+           subGeneratedAtLeastOne = true;
+         }
       }
 
-      const itemsToInsert = orderItemsPayload.map((item: any) => ({ order_id: insertedOrder.id, ...item }));
-      const { error: insItemsErr } = await supabase.from('order_items').insert(itemsToInsert);
-
-      if (insItemsErr) {
-        console.error(`Failed to insert items for order ${insertedOrder.id}:`, insItemsErr);
-        results.push({ subscriptionId: sub.id, orderId: insertedOrder.id, status: "partial_error_items_failed" });
-      } else {
-        results.push({ subscriptionId: sub.id, orderId: insertedOrder.id, status: "success", items: itemsToInsert.length });
+      if (subGeneratedAtLeastOne) {
+        results.push({ subscriptionId: sub.id, status: "success" });
+      } else if (!subHasErrors && existingSlots.size > 0) {
+        results.push({ subscriptionId: sub.id, status: "skipped_already_exists" });
+      } else if (subHasErrors) {
+         results.push({ subscriptionId: sub.id, status: "errors_encountered" });
       }
     }
 

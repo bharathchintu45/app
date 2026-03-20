@@ -1,0 +1,18 @@
+
+> react-app@0.0.0 build
+> tsc -b && vite build
+
+src/components/kitchen/OrderLabel.tsx(2,1): error TS6133: 'formatDateTimeIndia' is declared but its value is never read.
+src/components/kitchen/OrderLabel.tsx(8,9): error TS6133: 'totalItems' is declared but its value is never read.
+src/components/kitchen/OrderLabel.tsx(29,16): error TS2552: Cannot find name 'formatDateIndia'. Did you mean 'formatDateTimeIndia'?
+src/components/kitchen/OrderLabel.tsx(29,51): error TS2552: Cannot find name 'formatTimeIndia'. Did you mean 'formatDateTimeIndia'?
+src/components/profile/SubscriptionManagement.tsx(2,44): error TS6133: 'Calendar' is declared but its value is never read.
+src/components/profile/SubscriptionManagement.tsx(5,1): error TS6133: 'formatDateIndia' is declared but its value is never read.
+src/components/profile/SubscriptionManagement.tsx(7,1): error TS6133: 'cn' is declared but its value is never read.
+src/components/profile/SubscriptionManagement.tsx(19,10): error TS6133: 'message' is declared but its value is never read.
+src/pages/AdminPage.tsx(6,3): error TS6133: 'Calendar' is declared but its value is never read.
+src/pages/AdminPage.tsx(36,24): error TS6133: 'Legend' is declared but its value is never read.
+src/pages/AdminPage.tsx(1503,11): error TS6133: 'todayStr' is declared but its value is never read.
+src/pages/AdminPage.tsx(1538,11): error TS6133: 'currentPeriodEndStr' is declared but its value is never read.
+src/pages/AdminPage.tsx(1569,11): error TS6133: 'previousPeriodEndStr' is declared but its value is never read.
+src/pages/AdminPage.tsx(2932,21): error TS2322: Type '"default"' is not assignable to type '"primary" | "secondary" | "outline" | "ghost" | undefined'.

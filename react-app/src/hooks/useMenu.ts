@@ -4,6 +4,72 @@ import type { MenuItem } from '../types';
 
 let cachedMenu: MenuItem[] | null = null;
 let fetchPromise: Promise<MenuItem[]> | null = null;
+let currentMenuCache: MenuItem[] | null = null; // Store fully resolved cache
+
+/**
+ * Shared helper to get the menu app-wide without re-fetching.
+ * This allows App.tsx or other components to access the same data as useMenu().
+ */
+export async function getMenu(): Promise<MenuItem[]> {
+  // If we already resolved and cached it fully, return instantly
+  if (currentMenuCache) return currentMenuCache;
+
+  // If there's an ongoing fetch, wait for it
+  if (fetchPromise) return fetchPromise;
+
+  fetchPromise = new Promise(async (resolve, reject) => {
+    const timeout = setTimeout(() => {
+      fetchPromise = null;
+      reject(new Error("Menu fetch timed out (10s). Check your connection."));
+    }, 10000);
+
+    try {
+      const { data, error } = await supabase
+        .from('menu_items')
+        .select('*')
+        .order('id');
+
+      clearTimeout(timeout);
+
+      if (error) {
+        console.error('Error fetching menu:', error);
+        fetchPromise = null;
+        reject(error);
+        return;
+      }
+
+      const mapped = (data || []).map((dbItem) => {
+        const rawCat = dbItem.category || '';
+        const capCat = rawCat ? (rawCat.charAt(0).toUpperCase() + rawCat.slice(1).toLowerCase()) : 'Snack';
+        return {
+          id: dbItem.id,
+          category: capCat as any,
+          name: dbItem.name,
+          description: dbItem.description,
+          image: dbItem.image_url,
+          calories: dbItem.calories,
+          protein: dbItem.protein,
+          carbs: dbItem.carbs,
+          fat: dbItem.fat,
+          fiber: dbItem.fiber,
+          priceINR: dbItem.price_inr,
+          available: dbItem.available !== false,
+          tags: dbItem.tags || [],
+        };
+      }) as MenuItem[];
+
+      currentMenuCache = mapped;
+      resolve(mapped);
+    } catch (err) {
+      clearTimeout(timeout);
+      console.error('Exception fetching menu:', err);
+      fetchPromise = null;
+      reject(err);
+    }
+  });
+
+  return fetchPromise;
+}
 
 export function useMenu() {
   const [menu, setMenu] = useState<MenuItem[]>(cachedMenu || []);
@@ -14,44 +80,9 @@ export function useMenu() {
     let isMounted = true;
 
     async function loadMenu() {
-      if (cachedMenu) {
-        setMenu(cachedMenu);
-        setLoading(false);
-        return;
-      }
-
-      if (!fetchPromise) {
-        fetchPromise = Promise.resolve(
-          supabase
-            .from('menu_items')
-            .select('*')
-            .order('id')
-            .then(({ data, error }) => {
-              if (error) throw error;
-              if (!data) return [];
-              
-              return data.map((dbItem) => ({
-                id: dbItem.id,
-                category: dbItem.category as any,
-                name: dbItem.name,
-                description: dbItem.description,
-                image: dbItem.image_url,
-                calories: dbItem.calories,
-                protein: dbItem.protein,
-                carbs: dbItem.carbs,
-                fat: dbItem.fat,
-                fiber: dbItem.fiber,
-                priceINR: dbItem.price_inr,
-                available: dbItem.available,
-              })) as MenuItem[];
-            })
-        );
-      }
-
       try {
-        const data = await fetchPromise;
+        const data = await getMenu();
         if (isMounted) {
-          cachedMenu = data;
           setMenu(data);
           setLoading(false);
         }
@@ -74,31 +105,13 @@ export function useMenu() {
   // Function to refresh the cache (useful for the Admin portal)
   const refreshMenu = async () => {
     setLoading(true);
+    cachedMenu = null;
     fetchPromise = null; // force new fetch
-    const { data, error: err } = await supabase.from('menu_items').select('*').order('id');
-    if (err) {
-      console.error("Refresh failed", err);
+    try {
+      const data = await getMenu();
+      setMenu(data);
+    } catch (err: any) {
       setError(err.message);
-      setLoading(false);
-      return;
-    }
-    if (data) {
-      const mapped: MenuItem[] = data.map((dbItem) => ({
-        id: dbItem.id,
-        category: dbItem.category as any,
-        name: dbItem.name,
-        description: dbItem.description,
-        image: dbItem.image_url,
-        calories: dbItem.calories,
-        protein: dbItem.protein,
-        carbs: dbItem.carbs,
-        fat: dbItem.fat,
-        fiber: dbItem.fiber,
-        priceINR: dbItem.price_inr,
-        available: dbItem.available,
-      }));
-      cachedMenu = mapped;
-      setMenu(mapped);
     }
     setLoading(false);
   };

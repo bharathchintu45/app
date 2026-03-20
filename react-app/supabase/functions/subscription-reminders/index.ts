@@ -22,12 +22,11 @@ serve(async (req) => {
 
     console.log(`[Subscription Reminders] Checking for subscriptions ending on ${targetDateString}...`);
 
-    // 1. Fetch all active personalized orders
+    // 1. Fetch all active personalized subscriptions
     const { data: plans, error: fetchErr } = await supabase
-      .from("orders")
-      .select("id, customer_name, delivery_date, meta, user_id")
-      .eq("kind", "personalized")
-      .neq("status", "cancelled");
+      .from("subscriptions")
+      .select("id, customer_name, start_date, end_date, duration_days, user_id")
+      .eq("status", "active");
 
     if (fetchErr) throw fetchErr;
 
@@ -35,24 +34,10 @@ serve(async (req) => {
 
     // 2. Identify which ones end exactly on the target date
     for (const plan of plans || []) {
-      const startDateStr = plan.delivery_date;
-      const meta = plan.meta as { durationDays?: number } | undefined;
-      const durationDays = meta?.durationDays;
+      const endDateString = plan.end_date;
+      const durationDays = plan.duration_days;
       
-      if (!startDateStr || !durationDays) continue;
-
-      const startDate = new Date(startDateStr);
-      const endDate = new Date(startDate);
-      // Add duration days to the start date to find the total span
-      endDate.setDate(startDate.getDate() + durationDays);
-
-      // Add paused days to the total span if any
-      const pausedDays = (meta as any)?.pausedDays || 0;
-      if (pausedDays > 0) {
-        endDate.setDate(endDate.getDate() + pausedDays);
-      }
-      
-      const endDateString = endDate.toISOString().slice(0, 10);
+      if (!endDateString || !durationDays) continue;
 
       // 3. If the plan ends exactly 2 days from now, we send the reminder
       if (endDateString === targetDateString) {
