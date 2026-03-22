@@ -40,10 +40,15 @@ export async function getMenu(): Promise<MenuItem[]> {
 
       const mapped = (data || []).map((dbItem) => {
         const rawCat = dbItem.category || '';
-        const capCat = rawCat ? (rawCat.charAt(0).toUpperCase() + rawCat.slice(1).toLowerCase()) : 'Snack';
+        let mappedCat = rawCat ? (rawCat.charAt(0).toUpperCase() + rawCat.slice(1).toLowerCase()) : 'Add-Ons';
+        // Map legacy DB categories
+        if (mappedCat === 'Breakfast') mappedCat = 'All-Day Kitchen';
+        else if (mappedCat === 'Lunch' || mappedCat === 'Dinner') mappedCat = 'Midday-Midnight Kitchen';
+        else if (mappedCat === 'Snack') mappedCat = 'Add-Ons';
+
         return {
           id: dbItem.id,
-          category: capCat as any,
+          category: mappedCat as any,
           name: dbItem.name,
           description: dbItem.description,
           image: dbItem.image_url,

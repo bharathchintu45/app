@@ -950,7 +950,7 @@ export function CheckoutPersonalPage({
         const isNew = !user.savedAddresses?.some(a => a.building === d.delivery.building && a.street === d.delivery.street);
         const updatedAddresses = isNew ? [...(user.savedAddresses || []), d.delivery] : (user.savedAddresses || []);
 
-        const processOrder = async (isCod: boolean) => {
+        const processOrder = async () => {
           setUser(prev => prev ? { ...prev, isPro: true, savedAddresses: updatedAddresses } : prev);
           await supabase.from('profiles').update({ saved_addresses: updatedAddresses, is_pro: true }).eq('id', user.id);
 
@@ -980,7 +980,7 @@ export function CheckoutPersonalPage({
             meta: { planId: subscription, orderNumber },
             delivery_fee: Math.round(summary.deliveryFee),
             total: Math.round(summary.total),
-            payment_status: isCod ? 'pending' : 'paid',
+            payment_status: 'paid',
           }).select('id').single();
 
           if (subTableErr || !subData) {
@@ -993,7 +993,7 @@ export function CheckoutPersonalPage({
             id: orderNumber, kind: "personalized", createdAt: Date.now(),
             headline: "Subscription Scheduled", deliveryAtLabel: `${plan.duration} days schedule`,
             customer: { ...d.delivery, receiverPhone: "+91" + d.delivery.receiverPhone.slice(-10), instructions: d.delivery.instructions || undefined },
-            payment: isCod ? "Cash on Delivery" : "PAID",
+            payment: "PAID",
             meta: { 
               plan: plan.title, startDate: startKey, endDate: dayKey(addDays(parseDateKeyToDate(startKey), Math.max(0, plan.duration - 1))), durationDays: plan.duration, mealsPerDay: plan.allowedSlots.length, chargeableDeliveries: chargeable.lines.length,
               scheduleLines: chargeable.lines.map((l) => ({ day: l.day, slot: l.slot, itemId: l.item.id, label: l.item.name, qty: l.qty, unitPriceAtOrder: l.item.priceINR })) 
@@ -1028,7 +1028,7 @@ export function CheckoutPersonalPage({
           },
           onSuccess: async () => {
             setOrderStatus("success");
-            await processOrder(false);
+            await processOrder();
             setTimeout(() => {
               setRoute("order-confirmation");
             }, 2000);

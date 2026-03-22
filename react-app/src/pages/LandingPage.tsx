@@ -12,6 +12,7 @@ import { MenuItemModal } from "../components/ui/MenuItemModal";
 import { cn } from "../lib/utils";
 import tfbLogoWebP from "../assets/tfb-logo.webp";
 import tfbLogoPng from "../assets/tfb-logo-opt.png";
+import { Footer } from "../components/layout/Footer";
 
 // Make sure to add a helper for the Pill component used in the prototype
 function Pill({ children }: { children: React.ReactNode }) {
@@ -48,7 +49,7 @@ export function LandingPage({
 
   const plan = useMemo(() => buildPlanFromSubscription(subscription), [subscription]);
 
-  const [regularTab, setRegularTab] = useState<Cat>("Breakfast");
+  const [regularTab, setRegularTab] = useState<Cat>("All-Day Kitchen");
   const [regularSearch, setRegularSearch] = useState("");
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
   const [modalItem, setModalItem] = useState<MenuItem | null>(null);
@@ -172,6 +173,13 @@ export function LandingPage({
   function addToCart(item: MenuItem, delta: number) {
     const isAvailable = item.available !== false;
     if (!isAvailable && delta > 0) return;
+    
+    // Time constraint for Midday-Midnight items
+    if (item.category === "Midday-Midnight Kitchen" && new Date().getHours() < 11 && delta > 0) {
+      showToast("Midday-Midnight items available from 11 AM to Midnight.");
+      return;
+    }
+
     setRegularCart((prev) => {
       const next = { ...prev };
       const cur = next[item.id] || 0;
@@ -648,6 +656,9 @@ export function LandingPage({
                               <Pill>C {it.carbs}g</Pill>
                               <Pill>F {it.fat}g</Pill>
                               {it.available === false && <span className="text-[10px] font-bold uppercase tracking-widest text-amber-600 self-center ml-1">Unavailable</span>}
+                              {it.available !== false && it.category === "Midday-Midnight Kitchen" && new Date().getHours() < 11 && (
+                                <span className="text-[10px] font-bold uppercase tracking-widest text-amber-600 self-center ml-1">Available from 11 AM</span>
+                              )}
                             </div>
                           </div>
                         </div>
@@ -660,9 +671,9 @@ export function LandingPage({
                               <Button 
                                 size="sm" 
                                 variant="outline" 
-                                className="h-8 px-5 rounded-lg bg-emerald-500 text-white hover:bg-emerald-600 transition-all text-sm font-bold shadow-sm border-emerald-500"
+                                className="h-8 px-5 rounded-lg bg-emerald-500 text-white hover:bg-emerald-600 transition-all text-sm font-bold shadow-sm border-emerald-500 disabled:opacity-50 disabled:bg-slate-300 disabled:border-slate-300 disabled:cursor-not-allowed"
                                 onClick={(e) => { e.stopPropagation(); addToCart(it, 1); }}
-                                disabled={it.available === false}
+                                disabled={it.available === false || (it.category === "Midday-Midnight Kitchen" && new Date().getHours() < 11)}
                               >
                                 Add
                               </Button>
@@ -670,7 +681,7 @@ export function LandingPage({
                               <div className="flex items-center gap-1.5 bg-emerald-50 rounded-lg border border-emerald-200 p-1 shadow-sm h-8">
                                 <Button size="sm" variant="ghost" className="h-[22px] w-[22px] p-0 hover:bg-emerald-100 text-emerald-700 rounded-md" onClick={(e) => { e.stopPropagation(); addToCart(it, -1); }}>−</Button>
                                 <div className="w-5 text-center text-xs font-black text-emerald-800">{qty}</div>
-                                <Button size="sm" variant="ghost" className="h-[22px] w-[22px] p-0 hover:bg-emerald-100 text-emerald-700 rounded-md" onClick={(e) => { e.stopPropagation(); addToCart(it, +1); }} disabled={it.available === false}>+</Button>
+                                <Button size="sm" variant="ghost" className="h-[22px] w-[22px] p-0 hover:bg-emerald-100 text-emerald-700 rounded-md disabled:opacity-50 disabled:cursor-not-allowed" onClick={(e) => { e.stopPropagation(); addToCart(it, +1); }} disabled={it.available === false || (it.category === "Midday-Midnight Kitchen" && new Date().getHours() < 11)}>+</Button>
                               </div>
                             )}
                           </div>
@@ -839,19 +850,7 @@ export function LandingPage({
       )}
 
       {/* Footer */}
-      <div className="mt-8 mb-8 border-t border-black/8 pt-8 text-sm text-black/40 font-medium pb-8">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex items-center gap-2">
-            <span className="w-5 h-5 rounded-md bg-black/10 flex items-center justify-center text-[10px] text-black">TF</span>
-            © {new Date().getFullYear()} THE FIT BOWL • Macro-first healthy meals
-          </div>
-      <div className="flex gap-4 items-center">
-            <button className="hover:text-black transition-colors">Privacy</button>
-            <span className="w-1 h-1 rounded-full bg-black/20"></span>
-            <button className="hover:text-black transition-colors">Terms</button>
-          </div>
-        </div>
-      </div>
+      <Footer />
       
       <MenuItemModal item={modalItem} onClose={() => setModalItem(null)} />
     </div>

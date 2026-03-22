@@ -384,7 +384,8 @@ function CustomersTab({ showToast }: { showToast: (msg: string) => void }) {
     // Limit to customers active in the last 180 days to keep CRM snappy
     const sixMonthsAgo = new Date(Date.now() - 180 * 24 * 60 * 60 * 1000).toISOString();
     
-    const [ordersRes, subsRes] = await Promise.all([
+    const [profilesRes, ordersRes, subsRes] = await Promise.all([
+      supabase.from('profiles').select('id, full_name, phone_number, created_at, address, dietary_preferences'),
       supabase.from('orders')
         .select('id, total, kind, status, created_at, customer_name, delivery_details, order_items(item_name, quantity, unit_price)')
         .neq('status', 'cancelled')
@@ -395,10 +396,32 @@ function CustomersTab({ showToast }: { showToast: (msg: string) => void }) {
         .or(`status.eq.active,end_date.gte.${sixMonthsAgo}`)
     ]);
 
+    if (profilesRes.error) {
+       console.error("Profiles fetch error:", profilesRes.error);
+       // showToast("Failed to fetch all profiles: " + profilesRes.error.message);
+    }
+
+    const allProfiles = profilesRes.data || [];
     const allOrders = ordersRes.data || [];
     const allSubs = subsRes.data || [];
     const custMap = new Map<string, any>();
     const getPhone = (details: any) => details?.receiverPhone?.trim() || "No Phone";
+
+    // Pre-populate with registered profiles
+    allProfiles.forEach(p => {
+      const phone = p.phone_number?.trim() && p.phone_number !== 'EMPTY' ? p.phone_number.trim() : `profile-${p.id}`;
+      const name = p.full_name?.trim() && p.full_name !== 'EMPTY' ? p.full_name.trim() : "Unknown User";
+      
+      custMap.set(phone, {
+        id: phone, name, phone: phone.startsWith('profile-') ? 'No Phone' : phone,
+        address: p.address || 'Not Provided',
+        dietaryPrep: p.dietary_preferences || 'Not Provided',
+        healthCond: p.health_conditions || 'Not Provided',
+        firstOrder: p.created_at || new Date().toISOString(), lastOrder: p.created_at || new Date().toISOString(),
+        totalOrders: 0, totalSpent: 0, activeSub: false,
+        orders: [], favorites: {}
+      });
+    });
 
     allOrders.forEach(o => {
       const phone = getPhone(o.delivery_details);
@@ -407,7 +430,8 @@ function CustomersTab({ showToast }: { showToast: (msg: string) => void }) {
 
       if (!custMap.has(key)) {
         custMap.set(key, { 
-          id: key, name, phone, 
+          id: key, name: name !== "Unknown" ? name : "Unknown User", phone, 
+          address: 'Not Provided', dietaryPrep: 'Not Provided', healthCond: 'Not Provided',
           firstOrder: o.created_at, lastOrder: o.created_at, 
           totalOrders: 0, totalSpent: 0, activeSub: false, 
           orders: [], favorites: {}
@@ -433,10 +457,19 @@ function CustomersTab({ showToast }: { showToast: (msg: string) => void }) {
       const phone = getPhone(s.delivery_details);
       const name = s.customer_name || s.delivery_details?.receiverName || "Unknown";
       const key = phone === "No Phone" ? name : phone;
-      if (custMap.has(key)) {
-         if (s.status === 'active') custMap.get(key).activeSub = true;
-         custMap.get(key).orders.push({ ...s, isSubRecord: true, created_at: s.start_date });
+      
+      if (!custMap.has(key)) {
+        custMap.set(key, { 
+          id: key, name: name !== "Unknown" ? name : "Unknown User", phone, 
+          address: 'Not Provided', dietaryPrep: 'Not Provided', healthCond: 'Not Provided',
+          firstOrder: s.start_date || new Date().toISOString(), lastOrder: s.start_date || new Date().toISOString(), 
+          totalOrders: 0, totalSpent: 0, activeSub: false, 
+          orders: [], favorites: {}
+        });
       }
+      const c = custMap.get(key);
+      if (s.status === 'active') c.activeSub = true;
+      c.orders.push({ ...s, isSubRecord: true, created_at: s.start_date });
     });
 
     const now = new Date().getTime();
@@ -545,6 +578,9 @@ function CustomersTab({ showToast }: { showToast: (msg: string) => void }) {
             <select value={filter} onChange={e => setFilter(e.target.value as any)} className="h-10 text-xs font-bold bg-slate-50 border-none rounded-xl px-4 outline-none">
               <option value="all">All Audience</option>
               <option value="Champion">🏆 Champions Only</option>
+              <option value="Loyal">⭐ Loyal</option>
+              <option value="Regular">🔄 Regular</option>
+              <option value="New">👋 Newcomers</option>
               <option value="At Risk">⚠️ At Risk</option>
               <option value="subscribers">📅 Active Subscribers</option>
             </select>
@@ -753,7 +789,7 @@ function CustomersTab({ showToast }: { showToast: (msg: string) => void }) {
 }
 
 type MenuDraft = { id: string; category: Cat; name: string; calories: string; protein: string; carbs: string; fat: string; fiber: string; priceINR: string; available: boolean; description?: string; image?: string; };
-const emptyDraft = (id: string): MenuDraft => ({ id, category: "Breakfast", name: "", calories: "", protein: "", carbs: "", fat: "", fiber: "", priceINR: "", available: true, description: "", image: "" });
+const emptyDraft = (id: string): MenuDraft => ({ id, category: "All-Day Kitchen", name: "", calories: "", protein: "", carbs: "", fat: "", fiber: "", priceINR: "", available: true, description: "", image: "" });
 const toDraft = (it: MenuItem): MenuDraft => ({ id: it.id, category: it.category, name: it.name, calories: String(Math.round(it.calories||0)), protein: String(Math.round(it.protein||0)), carbs: String(Math.round(it.carbs||0)), fat: String(Math.round(it.fat||0)), fiber: String(Math.round(it.fiber||0)), priceINR: it.priceINR===undefined||it.priceINR===null?"":String(Math.round(it.priceINR)), available: it.available !== false, description: it.description || "", image: it.image || "" });
 const fromDraft = (d: MenuDraft): MenuItem => { const n = (s: string) => Number(digitsOnly(s||"")||"0"); const p = d.priceINR.trim()===""?undefined:n(d.priceINR); return { id: d.id.trim(), category: d.category, name: d.name.trim(), calories: n(d.calories), protein: n(d.protein), carbs: n(d.carbs), fat: n(d.fat), fiber: n(d.fiber), priceINR: p, available: d.available, description: d.description?.trim() || undefined, image: d.image?.trim() || undefined }; };
 
@@ -1114,6 +1150,8 @@ export function AdminPage({ user, onBack, showToast }: { user: AppUser | null, o
   const storeCloseWeekend = useAppSettingString("store_close_weekend", "21:00");
   const googleMapsApiKey = useAppSettingString("google_maps_api_key", "");
   const enableStoreTimings = useAppSetting("enable_store_timings", true);
+  const enableEmailAuth = useAppSetting("enable_email_auth", true);
+  const enablePhoneAuth = useAppSetting("enable_phone_auth", true);
 
   const [draftSettings, setDraftSettings] = useState<{
     chatEnabled: boolean;
@@ -1149,6 +1187,8 @@ export function AdminPage({ user, onBack, showToast }: { user: AppUser | null, o
     storeCloseWeekend: string;
     googleMapsApiKey: string;
     enableStoreTimings: boolean;
+    enableEmailAuth: boolean;
+    enablePhoneAuth: boolean;
   } | null>(null);
 
   const [isSavingSettings, setIsSavingSettings] = useState(false);
@@ -1164,7 +1204,8 @@ export function AdminPage({ user, onBack, showToast }: { user: AppUser | null, o
       freeDeliverySetting, supportPhone, supportWhatsApp, autoOrderTimeSetting,
       autoOrderEnabledSetting, kitchenRealtimeStatus, kitchenPrepAggregation,
       healthPreferencesEnabled, storeAddressSetting, storeMapUrlSetting,
-      storeOpenWeekday, storeCloseWeekday, storeOpenWeekend, storeCloseWeekend, googleMapsApiKey, enableStoreTimings
+      storeOpenWeekday, storeCloseWeekday, storeOpenWeekend, storeCloseWeekend, googleMapsApiKey, enableStoreTimings,
+      enableEmailAuth, enablePhoneAuth
     ].every(s => !s.loading);
 
     if (allLoaded && !draftSettings) {
@@ -1202,6 +1243,8 @@ export function AdminPage({ user, onBack, showToast }: { user: AppUser | null, o
         storeCloseWeekend: storeCloseWeekend.value,
         googleMapsApiKey: googleMapsApiKey.value,
         enableStoreTimings: enableStoreTimings.value,
+        enableEmailAuth: enableEmailAuth.value,
+        enablePhoneAuth: enablePhoneAuth.value,
       });
     }
   }, [
@@ -1213,7 +1256,7 @@ export function AdminPage({ user, onBack, showToast }: { user: AppUser | null, o
     kitchenRealtimeStatus.loading, kitchenPrepAggregation.loading, healthPreferencesEnabled.loading,
     enableDelivery.loading, enablePickup.loading, storeAddressSetting.loading, storeMapUrlSetting.loading,
     storeOpenWeekday.loading, storeCloseWeekday.loading, storeOpenWeekend.loading, storeCloseWeekend.loading, googleMapsApiKey.loading,
-    enableStoreTimings.loading,
+    enableStoreTimings.loading, enableEmailAuth.loading, enablePhoneAuth.loading,
     draftSettings
   ]);
 
@@ -1255,6 +1298,8 @@ export function AdminPage({ user, onBack, showToast }: { user: AppUser | null, o
       await autoOrderTimeSetting.update(draftSettings.autoOrderTime);
       if (draftSettings.autoOrderEnabled !== autoOrderEnabledSetting.value) await autoOrderEnabledSetting.update(draftSettings.autoOrderEnabled);
       if (draftSettings.enableStoreTimings !== enableStoreTimings.value) await enableStoreTimings.update(draftSettings.enableStoreTimings);
+      if (draftSettings.enableEmailAuth !== enableEmailAuth.value) await enableEmailAuth.update(draftSettings.enableEmailAuth);
+      if (draftSettings.enablePhoneAuth !== enablePhoneAuth.value) await enablePhoneAuth.update(draftSettings.enablePhoneAuth);
       showToast("Settings saved successfully!");
     } catch (err) {
       console.error("Save error:", err);
@@ -2037,11 +2082,20 @@ export function AdminPage({ user, onBack, showToast }: { user: AppUser | null, o
     setMenuLoading(true);
     const { data } = await supabase.from('menu_items').select('*').order('id');
     if (data) {
-      setParsedMenu(data.map((d: any) => ({
-        id: d.id, category: d.category, name: d.name, description: d.description,
-        image: d.image_url, calories: d.calories, protein: d.protein, carbs: d.carbs,
-        fat: d.fat, fiber: d.fiber, priceINR: d.price_inr, available: d.available
-      })) as MenuItem[]);
+      setParsedMenu(data.map((d: any) => {
+        const rawCat = d.category || '';
+        let mappedCat = rawCat ? (rawCat.charAt(0).toUpperCase() + rawCat.slice(1).toLowerCase()) : 'Add-Ons';
+        // Map legacy DB categories
+        if (mappedCat === 'Breakfast') mappedCat = 'All-Day Kitchen';
+        else if (mappedCat === 'Lunch' || mappedCat === 'Dinner') mappedCat = 'Midday-Midnight Kitchen';
+        else if (mappedCat === 'Snack') mappedCat = 'Add-Ons';
+
+        return {
+          id: d.id, category: mappedCat, name: d.name, description: d.description,
+          image: d.image_url, calories: d.calories, protein: d.protein, carbs: d.carbs,
+          fat: d.fat, fiber: d.fiber, priceINR: d.price_inr, available: d.available
+        };
+      }) as MenuItem[]);
     }
     setMenuLoading(false);
   }
@@ -2289,7 +2343,7 @@ export function AdminPage({ user, onBack, showToast }: { user: AppUser | null, o
                              setDraft({
                                id: `NEW-${Math.random().toString(36).substr(2, 6).toUpperCase()}`,
                                name: "New Item",
-                               category: "Breakfast",
+                               category: "All-Day Kitchen",
                                calories: 0, protein: 0, carbs: 0, fat: 0, fiber: 0, priceINR: 0,
                                description: "", image: "", available: true
                              } as any);
@@ -2388,14 +2442,13 @@ export function AdminPage({ user, onBack, showToast }: { user: AppUser | null, o
                           <div className="flex items-center gap-2">
                             <label className="text-[10px] font-bold text-slate-400 uppercase">Category</label>
                             <select 
-                              value={draft.category || "Breakfast"} 
+                              value={draft.category || "All-Day Kitchen"} 
                               onChange={e => setDraft({...draft, category: e.target.value as any})}
                               className="bg-slate-50 border border-slate-200 text-sm font-bold text-slate-700 rounded-lg py-1 px-3"
                             >
-                              <option value="Breakfast">Breakfast</option>
-                              <option value="Lunch">Lunch</option>
-                              <option value="Dinner">Dinner</option>
-                              <option value="Snack">Snack</option>
+                              <option value="All-Day Kitchen">All-Day Kitchen</option>
+                              <option value="Midday-Midnight Kitchen">Midday-Midnight Kitchen</option>
+                              <option value="Add-Ons">Add-Ons</option>
                             </select>
                           </div>
                           <div className="w-px h-6 bg-slate-200" />
@@ -2456,7 +2509,7 @@ export function AdminPage({ user, onBack, showToast }: { user: AppUser | null, o
                         <Input value={simpleSearch} onChange={e => setSimpleSearch(e.target.value)} placeholder="Filter items by name..." className="bg-white md:w-64 shrink-0" />
                         
                         <div className="flex flex-wrap gap-2">
-                           {["All", "Breakfast", "Lunch", "Dinner", "Snack"].map(c => (
+                           {["All", "All-Day Kitchen", "Midday-Midnight Kitchen", "Add-Ons"].map(c => (
                               <button 
                                 key={c} 
                                 onClick={() => setStockCategoryFilter(c)}
@@ -3356,6 +3409,32 @@ export function AdminPage({ user, onBack, showToast }: { user: AppUser | null, o
                     className={`relative inline-flex h-7 w-12 shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${draftSettings?.enableHealthPreferences ? 'bg-emerald-500' : 'bg-slate-300'}`}
                   >
                     <span className={`pointer-events-none inline-block h-6 w-6 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${draftSettings?.enableHealthPreferences ? 'translate-x-5' : 'translate-x-0'}`} />
+                  </button>
+                </div>
+
+                <div className="bg-slate-50 border border-slate-200 rounded-2xl p-6 flex items-start justify-between">
+                  <div className="pr-4">
+                    <h3 className="font-bold text-slate-900">Email Login</h3>
+                    <p className="text-sm text-slate-500 mt-1">Allow customers to log in or sign up using an email address and OTP.</p>
+                  </div>
+                  <button
+                    onClick={() => setDraftSettings(d => d ? { ...d, enableEmailAuth: !d.enableEmailAuth } : null)}
+                    className={`relative inline-flex h-7 w-12 shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${draftSettings?.enableEmailAuth ? 'bg-emerald-500' : 'bg-slate-300'}`}
+                  >
+                    <span className={`pointer-events-none inline-block h-6 w-6 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${draftSettings?.enableEmailAuth ? 'translate-x-5' : 'translate-x-0'}`} />
+                  </button>
+                </div>
+
+                <div className="bg-slate-50 border border-slate-200 rounded-2xl p-6 flex items-start justify-between">
+                  <div className="pr-4">
+                    <h3 className="font-bold text-slate-900">Phone Login</h3>
+                    <p className="text-sm text-slate-500 mt-1">Allow customers to log in or sign up using a mobile number and SMS OTP.</p>
+                  </div>
+                  <button
+                    onClick={() => setDraftSettings(d => d ? { ...d, enablePhoneAuth: !d.enablePhoneAuth } : null)}
+                    className={`relative inline-flex h-7 w-12 shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${draftSettings?.enablePhoneAuth ? 'bg-emerald-500' : 'bg-slate-300'}`}
+                  >
+                    <span className={`pointer-events-none inline-block h-6 w-6 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${draftSettings?.enablePhoneAuth ? 'translate-x-5' : 'translate-x-0'}`} />
                   </button>
                 </div>
 

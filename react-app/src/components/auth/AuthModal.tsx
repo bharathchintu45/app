@@ -9,6 +9,7 @@ import { Input } from "../ui/Input";
 import { cn } from "../../lib/utils";
 import type { AppUser, AuthIntent, UserRole } from "../../types";
 import { supabase } from "../../lib/supabase";
+import { useAppSetting } from "../../hooks/useAppSettings";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type Step = "email" | "otp" | "profile" | "success";
@@ -59,6 +60,17 @@ export function AuthModal({
   const [successMsg,  setSuccessMsg]  = useState("");
   const [loading,     setLoading]     = useState(false);
   const [errorMsg,    setErrorMsg]    = useState("");
+
+  const { value: emailAuthEnabled } = useAppSetting("enable_email_auth", true);
+  const { value: phoneAuthEnabled } = useAppSetting("enable_phone_auth", true);
+
+  useEffect(() => {
+    if (!emailAuthEnabled && phoneAuthEnabled && authMethod === "email") {
+      setAuthMethod("phone");
+    } else if (!phoneAuthEnabled && emailAuthEnabled && authMethod === "phone") {
+      setAuthMethod("email");
+    }
+  }, [emailAuthEnabled, phoneAuthEnabled, authMethod]);
 
   // OTP
   const [otp,          setOtp]           = useState(["", "", "", "", "", ""]);
@@ -159,7 +171,6 @@ export function AuthModal({
   async function handleSendOtp(e: React.FormEvent) {
     e.preventDefault();
     setErrorMsg("");
-    if (!email.includes("@")) return setErrorMsg("Please enter a valid email address.");
     
     // Testing bypass
     if (email === "test2@example.com") {
@@ -174,38 +185,36 @@ export function AuthModal({
       return;
     }
 
-    setLoading(true);
-    
     const params: any = {
       options: { shouldCreateUser: true },
     };
 
     if (authMethod === "email") {
       if (!email.includes("@")) {
-        setLoading(false);
         return setErrorMsg("Please enter a valid email address.");
       }
       params.email = email;
     } else {
       if (phone.length < 10) {
-        setLoading(false);
         return setErrorMsg("Please enter a valid 10-digit phone number.");
       }
       params.phone = `+91${phone}`;
     }
 
-    const { error } = await supabase.auth.signInWithOtp(params);
-    setLoading(false);
-    
-    if (error) {
-      if (error.message.toLowerCase().includes("sending") || error.message.toLowerCase().includes("smtp")) {
-         return setErrorMsg("Could not send OTP. Please wait 60 seconds or try again.");
-      }
-      return setErrorMsg(error.message);
-    }
-    
-    startCooldown();
+    // Instantly transition for perceived performance
     setStep("otp");
+    startCooldown();
+
+    // Fire API asynchronously in background
+    supabase.auth.signInWithOtp(params).then(({ error }) => {
+      if (error) {
+        if (error.message.toLowerCase().includes("sending") || error.message.toLowerCase().includes("smtp")) {
+           setErrorMsg("Could not send OTP. Please wait 60 seconds or try again.");
+        } else {
+           setErrorMsg(error.message);
+        }
+      }
+    });
   }
 
   async function handleVerifyOtp(e?: React.FormEvent) {
@@ -298,17 +307,22 @@ export function AuthModal({
   async function handleProfileSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!name.trim()) return setErrorMsg("Please enter your name.");
+    if (authMethod === "phone" && (!email.trim() || !email.includes("@"))) return setErrorMsg("Please enter a valid email.");
+    if (authMethod === "email" && phone.length < 10) return setErrorMsg("Please enter a valid 10-digit phone number.");
     
     setLoading(true);
     const { data: { user: authUser } } = await supabase.auth.getUser();
     if (!authUser) { setLoading(false); return setErrorMsg("Session expired. Please try again."); }
 
+    const finalEmail = authUser.email || email.trim();
+    const finalPhone = authUser.phone || `+91${phone.trim()}`;
+
     // Use UPSERT just in case the trigger genuinely failed to insert
     const { error } = await supabase.from("profiles").upsert({
       id: authUser.id,
       full_name: name.trim(),
-      email: authUser.email,
-      phone_number: authUser.phone,
+      email: finalEmail,
+      phone_number: finalPhone,
       role: 'customer' // Safe default, portals will block access if wrong anyway.
     });
 
@@ -317,8 +331,8 @@ export function AuthModal({
     const u: AppUser = { 
       id: authUser.id, 
       name: name.trim(), 
-      phone: authUser.phone || "", 
-      email: authUser.email || "", 
+      phone: finalPhone, 
+      email: finalEmail, 
       role: "customer",
       isPro: false,
       savedAddresses: []
@@ -332,13 +346,25 @@ export function AuthModal({
 
   // ── OTP input handlers ────────────────────────────────────────────────────
   function handleOtpChange(i: number, v: string) {
-    const d = v.replace(/\D/g, "").slice(-1);
+    const digits = v.replace(/\D/g, "");
+    
+    // Handle multi-character paste or autocomplete that bypasses onPaste 
+    if (digits.length > 1) {
+      const next = [...otp];
+      digits.slice(0, 6).split("").forEach((d, idx) => {
+        if (i + idx < 6) next[i + idx] = d;
+      });
+      setOtp(next);
+      const nextFocus = Math.min(i + digits.length, 5);
+      otpRefs.current[nextFocus]?.focus();
+      return;
+    }
+
+    const d = digits.slice(-1);
     const next = [...otp]; next[i] = d; setOtp(next);
     
     if (d && i < 5) {
       otpRefs.current[i + 1]?.focus();
-    } else if (d && i === 5) {
-      // Do not auto-submit to prevent rapid re-rendering states. Just light up the button.
     }
   }
   function handleOtpKeyDown(i: number, e: React.KeyboardEvent<HTMLInputElement>) {
@@ -435,7 +461,7 @@ export function AuthModal({
                   {/* STEP 1: INITIAL LOGIN (Email/Password for Portals, OTP for Customers) */}
                   {step === "email" && (
                     <form onSubmit={isPortal ? handlePasswordSignIn : handleSendOtp} className="space-y-6">
-                      {!isPortal && (
+                      {!isPortal && emailAuthEnabled && phoneAuthEnabled && (
                         <div className="flex p-1 bg-slate-100 rounded-xl mb-6 relative">
                           <motion.div
                             layoutId="authToggle"
@@ -578,20 +604,58 @@ export function AuthModal({
                   {/* STEP 3: SETUP PROFILE */}
                   {step === "profile" && (
                     <form onSubmit={handleProfileSubmit} className="space-y-6">
-                      <div className="space-y-1">
-                        <label className="text-sm font-semibold text-slate-700 ml-1">What should we call you?</label>
-                        <div className="relative group">
-                          <User className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400 group-focus-within:text-tfb-green transition-colors" />
-                          <Input
-                            type="text"
-                            placeholder="Your full name"
-                            value={name}
-                            onChange={(e) => setName(e.target.value)}
-                            className="pl-11 h-12 bg-slate-50 border-slate-200 focus:bg-white transition-all ring-offset-0"
-                            autoFocus
-                            required
-                          />
+                      <div className="space-y-4">
+                        <div className="space-y-1">
+                          <label className="text-sm font-semibold text-slate-700 ml-1">What should we call you?</label>
+                          <div className="relative group">
+                            <User className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400 group-focus-within:text-tfb-green transition-colors" />
+                            <Input
+                              type="text"
+                              placeholder="Your full name"
+                              value={name}
+                              onChange={(e) => setName(e.target.value)}
+                              className="pl-11 h-12 bg-slate-50 border-slate-200 focus:bg-white transition-all ring-offset-0"
+                              autoFocus
+                              required
+                            />
+                          </div>
                         </div>
+
+                        {authMethod === "phone" ? (
+                          <div className="space-y-1">
+                            <label className="text-sm font-semibold text-slate-700 ml-1">What is your email?</label>
+                            <div className="relative group">
+                              <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400 group-focus-within:text-tfb-green transition-colors" />
+                              <Input
+                                type="email"
+                                placeholder="you@example.com"
+                                value={email}
+                                onChange={(e) => setEmail(e.target.value)}
+                                className="pl-11 h-12 bg-slate-50 border-slate-200 focus:bg-white transition-all ring-offset-0"
+                                autoCapitalize="none"
+                                autoCorrect="off"
+                                required
+                              />
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="space-y-1">
+                            <label className="text-sm font-semibold text-slate-700 ml-1">What is your phone number?</label>
+                            <div className="relative group">
+                              <div className="absolute left-0 top-0 bottom-0 flex items-center gap-2 pl-4 pr-3 text-slate-500 font-bold border-r border-slate-200 h-12 my-auto">
+                                <span className="text-sm">+91</span>
+                              </div>
+                              <Input
+                                type="tel"
+                                placeholder="00000 00000"
+                                value={phone}
+                                onChange={(e) => setPhone(e.target.value.replace(/\D/g, "").slice(0, 10))}
+                                className="pl-16 h-12 bg-slate-50 border-slate-200 focus:bg-white transition-all ring-offset-0 font-medium tracking-wide"
+                                required
+                              />
+                            </div>
+                          </div>
+                        )}
                       </div>
                       <Button type="submit" disabled={loading} className="w-full h-12 text-base font-bold bg-slate-900 border-b-4 border-slate-950 hover:bg-slate-800 active:border-b-0 active:translate-y-1 transition-all">
                         {loading ? "Saving..." : "Start my journey"}

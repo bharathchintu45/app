@@ -10,6 +10,7 @@ import { clamp, digitsOnly, formatDateIndia, dayKey } from "../../lib/format";
 import { SkeletonMenuCard } from "../ui/Skeleton";
 import { cn } from "../../lib/utils";
 import type { GroupOrderDraft, GroupCart, MenuItem } from "../../types";
+import { CATS } from "../../data/menu";
 
 function Pill({ children }: { children: React.ReactNode }) {
   return <span className="text-[10px] font-bold uppercase tracking-normal sm:tracking-widest px-2 py-0.5 rounded bg-black/5 text-black/60">{children}</span>;
@@ -43,7 +44,7 @@ export function GroupOrderView({
   showToast,
 }: GroupOrderViewProps) {
   const groupDiscount = useAppSettingNumber("group_discount_pct", 0);
-  const [groupCat, setGroupCat] = React.useState<import("../../types").Cat>("Lunch");
+  const [groupCat, setGroupCat] = React.useState<import("../../types").Cat>("All-Day Kitchen");
   const [groupSearch, setGroupSearch] = React.useState("");
   const [selectedTag, setSelectedTag] = React.useState<string | null>(null);
   const [isCartOpen, setIsCartOpen] = useState(false);
@@ -154,6 +155,13 @@ export function GroupOrderView({
   function addToGroup(item: MenuItem, delta: number) {
     const isAvailable = item.available !== false;
     if (!isAvailable && delta > 0) return;
+    
+    const deliveryHour = groupDraft.deliveryAt ? new Date(groupDraft.deliveryAt).getHours() : new Date().getHours();
+    if (item.category === "Midday-Midnight Kitchen" && deliveryHour < 11 && delta > 0) {
+      showToast("Midday-Midnight items available from 11 AM to Midnight.");
+      return;
+    }
+
     setGroupCart((prev) => {
       const next = { ...prev };
       const cur = next[item.id] || 0;
@@ -236,7 +244,7 @@ export function GroupOrderView({
         <div className="rounded-2xl border border-black/10 p-3">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between bg-slate-50/50 p-3 rounded-xl border border-slate-100 mb-3">
             <div className="flex flex-wrap gap-2">
-              {["Breakfast", "Lunch", "Dinner", "Snack"].map((c) => (
+              {CATS.map((c: string) => (
                 <Button key={c} size="sm" variant={groupCat === c ? "secondary" : "outline"} onClick={() => setGroupCat(c as any)}>
                   {c}
                 </Button>
@@ -312,6 +320,10 @@ export function GroupOrderView({
                                 </span>
                               </div>
                             )}
+                            {it.available === false && <span className="text-[10px] font-bold uppercase tracking-widest text-amber-600 self-center ml-1">Unavailable</span>}
+                            {it.available !== false && it.category === "Midday-Midnight Kitchen" && (groupDraft.deliveryAt ? new Date(groupDraft.deliveryAt).getHours() : new Date().getHours()) < 11 && (
+                              <span className="text-[10px] font-bold uppercase tracking-widest text-amber-600 self-center ml-1">Available from 11 AM</span>
+                            )}
                           </div>
                         </div>
                       </div>
@@ -320,9 +332,9 @@ export function GroupOrderView({
                           <Button 
                             size="sm" 
                             variant="outline" 
-                            className="h-8 px-5 rounded-lg bg-emerald-500 text-white hover:bg-emerald-600 transition-all text-sm font-bold shadow-sm border-emerald-500"
+                            className="h-8 px-5 rounded-lg bg-emerald-500 text-white hover:bg-emerald-600 transition-all text-sm font-bold shadow-sm border-emerald-500 disabled:opacity-50 disabled:bg-slate-300 disabled:border-slate-300 disabled:cursor-not-allowed"
                             onClick={(e) => { e.stopPropagation(); addToGroup(it, 1); }}
-                            disabled={it.available === false}
+                            disabled={it.available === false || (it.category === "Midday-Midnight Kitchen" && (groupDraft.deliveryAt ? new Date(groupDraft.deliveryAt).getHours() : new Date().getHours()) < 11)}
                           >
                             Add
                           </Button>
@@ -330,7 +342,7 @@ export function GroupOrderView({
                           <div className="flex items-center gap-1.5 bg-emerald-50 rounded-lg border border-emerald-200 p-1 shadow-sm h-8">
                             <Button size="sm" variant="ghost" className="h-[22px] w-[22px] p-0 hover:bg-emerald-100 text-emerald-700 rounded-md" onClick={(e) => { e.stopPropagation(); addToGroup(it, -1); }}>−</Button>
                             <div className="w-5 text-center text-xs font-black text-emerald-800">{qty}</div>
-                            <Button size="sm" variant="ghost" className="h-[22px] w-[22px] p-0 hover:bg-emerald-100 text-emerald-700 rounded-md" onClick={(e) => { e.stopPropagation(); addToGroup(it, +1); }} disabled={it.available === false}>+</Button>
+                            <Button size="sm" variant="ghost" className="h-[22px] w-[22px] p-0 hover:bg-emerald-100 text-emerald-700 rounded-md disabled:opacity-50 disabled:cursor-not-allowed" onClick={(e) => { e.stopPropagation(); addToGroup(it, +1); }} disabled={it.available === false || (it.category === "Midday-Midnight Kitchen" && (groupDraft.deliveryAt ? new Date(groupDraft.deliveryAt).getHours() : new Date().getHours()) < 11)}>+</Button>
                           </div>
                         )}
                       </div>

@@ -572,9 +572,14 @@ export function UserSettingsPage({
               </>
             ) :
             isSubLoading ? (
-              <div className="py-40 flex flex-col items-center justify-center space-y-6">
-                <div className="w-12 h-12 border-4 border-slate-200 border-t-slate-900 rounded-full animate-spin" />
-                <p className="text-xs text-slate-400 font-black uppercase tracking-[0.2em]">Loading your nutrition plan...</p>
+              <div className="space-y-6 animate-pulse w-full">
+                <div className="h-64 sm:h-80 bg-slate-200 rounded-[2.5rem] w-full shadow-sm" />
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  <div className="h-32 bg-slate-200 rounded-[1.75rem] w-full shadow-sm" />
+                  <div className="h-32 bg-slate-200 rounded-[1.75rem] w-full shadow-sm" />
+                  <div className="h-32 bg-slate-200 rounded-[1.75rem] w-full shadow-sm" />
+                  <div className="h-32 bg-slate-200 rounded-[1.75rem] w-full shadow-sm" />
+                </div>
               </div>
             ) : (
               /* No plan — upgrade card */

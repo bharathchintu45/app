@@ -1,4 +1,4 @@
-export type Cat = "Breakfast" | "Lunch" | "Dinner" | "Snack";
+export type Cat = "All-Day Kitchen" | "Midday-Midnight Kitchen" | "Add-Ons";
 
 export interface MenuItem {
   id: string;
@@ -17,7 +17,7 @@ export interface MenuItem {
 }
 
 export type Slot = "Slot1" | "Slot2" | "Slot3";
-export type PlanType = "breakfast" | "lunch" | "dinner" | "breakfast-lunch" | "lunch-dinner" | "breakfast-dinner" | "complete";
+export type PlanType = "1meal" | "2meals" | "complete";
 export type Duration = 7 | 15 | 30;
 
 export interface PlanConfig {
@@ -25,6 +25,7 @@ export interface PlanConfig {
   title: string;
   duration: Duration;
   allowedSlots: Slot[];
+  maxMeals: number;
 }
 
 export interface DeliveryDetails {
@@ -57,7 +58,7 @@ export interface AppUser {
   healthScore?: number;
 }
 
-export type Route = "home" | "login" | "checkout-regular" | "checkout-personal" | "checkout-group" | "order-confirmation" | "app" | "dashboard" | "admin" | "kitchen" | "delivery" | "profile" | "orders" | "404";
+export type Route = "home" | "login" | "checkout-regular" | "checkout-personal" | "checkout-group" | "order-confirmation" | "app" | "dashboard" | "admin" | "kitchen" | "delivery" | "profile" | "orders" | "404" | "about" | "contact" | "privacy" | "terms" | "refunds" | "shipping";
 
 export type DashboardTab = "personal" | "group";
 export type AuthIntent = "none" | "regular" | "personal" | "group" | "admin" | "kitchen" | "delivery";

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { X, Search } from "lucide-react";
 import type { MenuItem, Slot, Cat } from "../../types";
+import { CATS } from "../../data/menu";
 
 interface SwapMealModalProps {
   isOpen: boolean;
@@ -13,7 +14,7 @@ interface SwapMealModalProps {
 
 export function SwapMealModal({ isOpen, onClose, slot, menu, onSwap }: SwapMealModalProps) {
   const [search, setSearch] = useState("");
-  const [tab, setTab] = useState<Cat>("Breakfast");
+  const [tab, setTab] = useState<Cat>("All-Day Kitchen");
 
   if (!isOpen) return null;
 
@@ -44,10 +45,10 @@ export function SwapMealModal({ isOpen, onClose, slot, menu, onSwap }: SwapMealM
 
           <div className="p-4 sm:p-6 border-b border-slate-100 bg-slate-50 hidden sm:block">
             <div className="flex gap-2 p-1 bg-slate-200/50 rounded-xl overflow-x-auto hide-scrollbar">
-              {(["Breakfast", "Lunch", "Snack", "Dinner"] as Cat[]).map((c) => (
+              {CATS.map((c) => (
                 <button
                   key={c}
-                  onClick={() => setTab(c)}
+                  onClick={() => setTab(c as Cat)}
                   className={`flex-1 min-w-[100px] py-2.5 px-4 rounded-lg text-sm font-bold transition-all whitespace-nowrap ${
                     tab === c ? "bg-white text-emerald-900 shadow-sm" : "text-slate-500 hover:text-slate-700 hover:bg-slate-200/50"
                   }`}

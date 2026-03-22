@@ -1,14 +1,23 @@
-import React, { useMemo } from "react";
+import React, { useMemo, useState } from "react";
 import { Card, CardHeader, CardContent } from "../ui/Card";
 import { Input } from "../ui/Input";
 import { Button } from "../ui/Button";
 import { SectionTitle } from "../ui/Typography";
 import { Sparkles, ArrowRight, Search, Flame, Beef, Wheat, Droplets, Leaf, CalendarDays, Clock, Coffee, Sun, Utensils, Copy, Repeat, Check } from "lucide-react";
 import { formatDateIndia, slotLabel, clamp, digitsOnly, parseDateKeyToDate, dayKey, addDays } from "../../lib/format";
-import { DURATIONS, PLAN_TYPES, subscriptionId, CATS } from "../../data/menu";
+import { DURATIONS, PLAN_TYPES, subscriptionId } from "../../data/menu";
 import { useAppSettingNumber } from "../../hooks/useAppSettings";
 import { cn } from "../../lib/utils";
-import type { PlanConfig, Macros, MenuItem, StartDateMap, TargetMap, HoldsMap, PlanMap, Slot, DayHold, Cat } from "../../types";
+import { MealPopup } from "./MealPopup";
+import { AddonPopup } from "./AddonPopup";
+import type { AddonEntry, SlotAddons } from "./AddonPopup";
+import type { PlanConfig, Macros, MenuItem, StartDateMap, TargetMap, HoldsMap, PlanMap, Slot, DayHold } from "../../types";
+
+const MENU_SECTIONS = [
+  { id: "all", name: "All-Day Kitchen", note: "Available All Day", kind: "meal" as const },
+  { id: "mid", name: "Midday\u2013Midnight Kitchen", note: "\uD83D\uDD52 11 AM \u2013 Midnight", kind: "meal" as const },
+  { id: "extra", name: "Add-Ons", note: "Coffee, smoothies & sides", kind: "addon" as const },
+] as const;
 
 function Pill({ children }: { children: React.ReactNode }) {
   return <span className="text-[10px] font-bold uppercase tracking-normal sm:tracking-widest px-2 py-0.5 rounded bg-black/5 text-black/60">{children}</span>;
@@ -85,22 +94,23 @@ interface PersonalizedPlanViewProps {
   setRoute: (r: any) => void;
   copyToNextDay: () => void;
   repeatForProjected: () => void;
-  activeSlot: Slot;
-  setActiveSlot: (s: Slot) => void;
   selectedDayPlan: Partial<Record<Slot, MenuItem | null>>;
-  slotSearch: string;
-  setSlotSearch: (s: string) => void;
-  slotMenuTab: string;
-  setSlotMenuTab: (s: Cat) => void;
-  slotFilteredMenu: MenuItem[];
   toggleSlotItem: (date: string, slot: Slot, item: MenuItem) => void;
   setModalItem: (item: MenuItem | null) => void;
   isLoading?: boolean;
   defaultTargets: Macros;
-  slotSelectedTag?: string | null;
-  setSlotSelectedTag?: (tag: string | null) => void;
-  availableSlotTags?: string[];
   hasActiveSubscription?: boolean;
+  // New popup-based meal selection props
+  menu: MenuItem[];
+  slotAddons: SlotAddons;
+  popup: MenuItem | null;
+  setPopup: (item: MenuItem | null) => void;
+  addonPopup: MenuItem | null;
+  setAddonPopup: (item: MenuItem | null) => void;
+  upsertMeal: (slot: Slot, item: MenuItem) => void;
+  removeMeal: (slot: Slot) => void;
+  attachAddon: (slot: Slot, item: MenuItem) => void;
+  removeAddon: (slot: Slot, item: MenuItem) => void;
 }
 
 export function PersonalizedPlanView({
@@ -123,24 +133,42 @@ export function PersonalizedPlanView({
   setRoute,
   copyToNextDay: _copyToNextDay,
   repeatForProjected: _repeatForProjected,
-  activeSlot,
-  setActiveSlot,
   selectedDayPlan,
-  slotSearch,
-  setSlotSearch,
-  slotMenuTab,
-  setSlotMenuTab,
-  slotFilteredMenu,
   toggleSlotItem,
   setModalItem,
   isLoading: _isLoading,
   defaultTargets,
-  slotSelectedTag,
-  setSlotSelectedTag,
-  availableSlotTags = [],
   hasActiveSubscription,
+  menu,
+  slotAddons,
+  popup,
+  setPopup,
+  addonPopup,
+  setAddonPopup,
+  upsertMeal,
+  removeMeal,
+  attachAddon,
+  removeAddon,
 }: PersonalizedPlanViewProps) {
   const personalizedDiscount = useAppSettingNumber("personalized_discount_pct", 15);
+
+  // Internal state for popup-based menu sections
+  const [section, setSection] = useState("all");
+  const [menuSearch, setMenuSearch] = useState("");
+
+  const sectionItems = useMemo(() => {
+    const q = menuSearch.trim().toLowerCase();
+    return menu
+      .filter(m => {
+        if (section === "all") return m.category === "All-Day Kitchen";
+        if (section === "mid") return m.category === "Midday-Midnight Kitchen";
+        if (section === "extra") return m.category === "Add-Ons";
+        return true;
+      })
+      .filter(m => !q || (m.name + (m.description || "")).toLowerCase().includes(q));
+  }, [menu, section, menuSearch]);
+
+  const isAddonSection = MENU_SECTIONS.find(s => s.id === section)?.kind === "addon";
 
   const { chargeableCount } = useMemo(() => {
     let count = 0;
@@ -197,7 +225,7 @@ export function PersonalizedPlanView({
             </div>
           </div>
           <div className="mt-3 rounded-lg bg-black/3 px-3 py-2 text-sm">
-            ✅ <span className="font-semibold">{plan.title}</span> — {plan.allowedSlots.length} meal{plan.allowedSlots.length > 1 ? "s" : ""}/day
+            ✅ <span className="font-semibold">{plan.duration} days</span> • {plan.title}
           </div>
         </div>
 
@@ -361,10 +389,9 @@ export function PersonalizedPlanView({
           </div>
 
           {/* Selected day controls */}
-          <div className="grid gap-4 lg:grid-cols-2">
-            {/* Left: holds + current selections + macros */}
-            <div className="space-y-4 min-w-0">
-              <div className="rounded-2xl border border-slate-200 bg-slate-50/30 p-4">
+          <div className="space-y-4">
+            {/* Hold card (Full width) */}
+            <div className="rounded-2xl border border-slate-200 bg-slate-50/30 p-4">
                 <div className="flex items-center justify-between mb-2">
                   <div className="text-sm font-semibold">{formatDateIndia(selectedDate)}</div>
                   <Button 
@@ -398,9 +425,11 @@ export function PersonalizedPlanView({
                 )}
               </div>
 
-
-              {/* Macro tracker */}
-              <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+              <div className="grid gap-4 lg:grid-cols-2">
+                {/* Left: Macro Progress */}
+                <div className="space-y-4 min-w-0 h-full">
+                  {/* Macro tracker */}
+                  <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm h-full">
                 <div className="flex items-center justify-between mb-4">
                   <div className="text-sm font-bold text-slate-900 uppercase tracking-tight">Macro Progress</div>
                   <div className="text-[10px] bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full font-bold">Today</div>
@@ -413,222 +442,195 @@ export function PersonalizedPlanView({
                   <MacroLine label="Fiber" value={selectedMacros.fiber} target={targets.fiber} unit="g" icon={Leaf} color="text-emerald-500" bg="bg-emerald-50" />
                 </div>
               </div>
-            </div>
+                </div>
 
-            {/* Right: meal picker */}
-            <div className="space-y-3 min-w-0">
-              {/* Today's Selections - Daily Tray Layout */}
-              <div className="rounded-2xl border border-slate-200 bg-slate-50/50 p-4 shadow-sm">
+                {/* Right: meal picker */}
+                <div className="space-y-3 min-w-0 h-full">
+                  {/* Today's Selections - Daily Tray Layout */}
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50/50 p-4 shadow-sm h-full flex flex-col">
                 <div className="flex items-center justify-between mb-3">
                   <div className="text-sm font-bold text-slate-900 uppercase tracking-tight">Daily Tray</div>
                   <div className="text-[10px] uppercase font-black text-slate-400">Selected Items</div>
                 </div>
-                <div className="space-y-2">
+                <div className="flex-1 flex flex-col justify-evenly gap-2">
                   {plan.allowedSlots.map((s) => {
                     const item = selectedDayPlan[s];
                     const isHeld = todaysHold.slots[s];
-                    const isActive = activeSlot === s;
-                    
+                    const addons = slotAddons[s] || [];
                     const SlotIcon = s === "Slot1" ? Coffee : s === "Slot2" ? Sun : Utensils;
+                    const slotColor = s === "Slot1"
+                      ? { border: "border-l-amber-400", icon: "bg-amber-100 text-amber-600", label: "text-amber-600" }
+                      : s === "Slot2"
+                      ? { border: "border-l-sky-400", icon: "bg-sky-100 text-sky-600", label: "text-sky-600" }
+                      : { border: "border-l-violet-400", icon: "bg-violet-100 text-violet-600", label: "text-violet-600" };
                     
                     return (
                       <div 
                         key={s} 
                         className={cn(
-                          "relative group flex items-center gap-3 p-3 rounded-xl border transition-all",
-                          isActive 
-                            ? "bg-white border-slate-900 shadow-md scale-[1.02] z-10" 
-                            : "bg-white/60 border-slate-100 hover:border-slate-200",
-                          isHeld && "opacity-60 bg-slate-100/50"
+                          "relative group py-5 px-4 rounded-2xl border border-l-4 transition-all shadow-sm",
+                          slotColor.border,
+                          item ? "bg-white border-slate-200 shadow-md" : "bg-white/80 border-slate-100 hover:border-slate-200 hover:shadow-md",
+                          isHeld && "opacity-60 bg-slate-50"
                         )}
-                        onClick={() => !isHeld && !todaysHold.day && setActiveSlot(s)}
-                        style={{ cursor: isHeld || todaysHold.day ? 'default' : 'pointer' }}
                       >
-                        <div className={cn(
-                          "p-2 rounded-lg",
-                          isActive ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-400 group-hover:bg-slate-200 transition-colors"
-                        )}>
-                          <SlotIcon size={16} />
-                        </div>
-                        
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-1.5 mb-0.5">
-                            <span className="text-[10px] font-black text-slate-400 uppercase tracking-normal sm:tracking-wider">{slotLabel(s)}</span>
-                            {isHeld && <span className="text-[9px] bg-rose-100 text-rose-600 px-1.5 py-0.5 rounded-md font-bold uppercase tracking-tighter">Locked</span>}
-                            {isActive && <span className="text-[9px] bg-emerald-100 text-emerald-600 px-1.5 py-0.5 rounded-md font-bold uppercase tracking-tighter">Editing</span>}
+                        <div className="flex items-center gap-4">
+                          <div className={cn("p-3 rounded-xl", slotColor.icon)}>
+                            <SlotIcon size={20} />
                           </div>
-                          <div className={cn(
-                            "text-sm font-bold truncate",
-                            item ? "text-slate-900" : "text-slate-300"
-                          )}>
-                            {isHeld ? "🔒 On Hold" : item?.name || "No item selected"}
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-1.5 mb-1">
+                              <span className={cn("text-[11px] font-black uppercase tracking-wider", slotColor.label)}>{slotLabel(s)}</span>
+                              {isHeld && <span className="text-[9px] bg-rose-100 text-rose-600 px-1.5 py-0.5 rounded-md font-bold uppercase">Locked</span>}
+                            </div>
+                            <div className={cn(
+                              "text-base font-bold truncate",
+                              item ? "text-slate-900" : "text-slate-300 italic"
+                            )}>
+                              {isHeld ? "🔒 On Hold" : item?.name || "No item selected"}
+                            </div>
                           </div>
+                          {item && !isHeld && (
+                            <div className="flex items-center gap-1.5 bg-emerald-50 px-2.5 py-1 rounded-full">
+                              <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                              <span className="text-[10px] font-black text-emerald-600 uppercase">Ready</span>
+                            </div>
+                          )}
                         </div>
-
-                        {item && !isHeld && (
-                          <div className="flex items-center gap-1">
-                            <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                            <span className="text-[10px] font-black text-emerald-600 uppercase">Ready</span>
+                        {/* Add-ons for this slot */}
+                        {addons.length > 0 && (
+                          <div className="mt-3 flex flex-wrap gap-1.5 pl-14">
+                            {addons.map((a) => (
+                              <span key={`${s}-addon-${a.item.id}`} className="rounded-full bg-amber-50 border border-amber-200 px-2.5 py-0.5 text-[10px] font-bold text-amber-700">
+                                + {a.item.name} × {a.qty}
+                              </span>
+                            ))}
                           </div>
                         )}
                       </div>
                     );
                   })}
                 </div>
+                  </div>
+                </div>
               </div>
 
-              {/* Menu items and filters in a Card with better spacing */}
-              <Card className="mt-6 shadow-sm border-slate-200 overflow-hidden">
+              {/* Menu sections & items */}
+              <Card className="shadow-sm border-slate-200 overflow-hidden">
                 <CardContent className="p-4 space-y-4">
-                  {/* Category filter + search */}
+                  {/* Section tabs */}
                   <div className="flex flex-col gap-3 min-w-0">
-                    <div className="flex items-center gap-2 w-full overflow-x-auto pb-1 no-scrollbar">
-                      <div className="flex gap-2 shrink-0">
-                        {CATS.map((c) => (
-                          <Button 
-                            key={c} 
-                            size="sm" 
-                            variant={slotMenuTab === c ? "primary" : "outline"} 
-                            onClick={() => setSlotMenuTab(c as Cat)}
-                            className="whitespace-nowrap h-8 px-2.5 text-[10px] font-bold"
-                          >
-                            {c} Item
-                          </Button>
-                        ))}
-                      </div>
+                    <div className="text-[10px] uppercase font-black text-slate-400 tracking-wider">Menu Sections</div>
+                    <div className="flex flex-wrap gap-2">
+                      {MENU_SECTIONS.map((sec) => (
+                        <button
+                          key={sec.id}
+                          onClick={() => { setSection(sec.id); setMenuSearch(""); }}
+                          className={cn(
+                            "rounded-2xl border px-4 py-2.5 text-left transition-all",
+                            section === sec.id
+                              ? "border-slate-900 bg-slate-900 text-white shadow-sm"
+                              : "border-slate-200 bg-white text-slate-800 hover:border-slate-300"
+                          )}
+                        >
+                          <div className="text-xs font-bold">{sec.name}</div>
+                          <div className={cn("text-[10px]", section === sec.id ? "text-slate-300" : "text-slate-500")}>{sec.note}</div>
+                        </button>
+                      ))}
                     </div>
                     <div className="relative">
                       <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={14} />
                       <Input 
-                        value={slotSearch} 
-                        onChange={(e) => setSlotSearch(e.target.value)} 
-                        placeholder="Search meals…" 
+                        value={menuSearch} 
+                        onChange={(e) => setMenuSearch(e.target.value)} 
+                        placeholder="Search items…" 
                         className="pl-9 h-9 w-full bg-slate-50 border-slate-100 text-sm focus:bg-white transition-all" 
                       />
                     </div>
                   </div>
 
-                  {/* Tag Filter Row */}
-                  {availableSlotTags.length > 0 && (
-                    <div className="flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar">
-                      <button
-                        onClick={() => setSlotSelectedTag?.(null)}
-                        className={cn(
-                          "whitespace-nowrap px-3 py-1 rounded-full text-[10px] font-bold transition-all border",
-                          !slotSelectedTag 
-                            ? "bg-black text-white border-black" 
-                            : "bg-white text-black/60 border-black/10 hover:border-black/20"
-                        )}
-                      >
-                        All
-                      </button>
-                      {availableSlotTags.map(tag => (
-                        <button
-                          key={tag}
-                          onClick={() => setSlotSelectedTag?.(tag === slotSelectedTag ? null : tag)}
-                          className={cn(
-                            "whitespace-nowrap px-3 py-1 rounded-full text-[10px] font-bold transition-all border flex items-center gap-1.5",
-                            slotSelectedTag === tag
-                              ? "bg-emerald-500 text-white border-emerald-500 shadow-sm"
-                              : "bg-white text-black/60 border-black/10 hover:border-black/20"
-                          )}
-                        >
-                          {tag}
-                        </button>
-                      ))}
-                    </div>
-                  )}
+                  {/* Section note */}
+                  <div className="rounded-xl bg-slate-50 p-3 text-xs text-slate-500 font-medium">
+                    {isAddonSection
+                      ? "Add-ons are linked to a meal. Tap any add-on and choose which meal to attach it to."
+                      : "Tap any item below, then choose which meal slot to assign it to in the popup."}
+                  </div>
 
                   {/* Menu items list */}
-                  {(() => {
-                    const slotHeld = todaysHold.day || todaysHold.slots[activeSlot];
-                    return (
-                      <div className={cn("max-h-[420px] overflow-y-auto space-y-2 pr-1 custom-scrollbar", slotHeld && "opacity-40 pointer-events-none")}>
-                        {slotHeld && (
-                          <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-center text-sm text-red-600 font-medium mb-2">
-                            🔒 This meal is on hold — items cannot be selected
-                          </div>
-                        )}
-                        {slotFilteredMenu.length === 0 ? (
-                          <div className="py-12 text-center">
-                            <div className="text-slate-300 mb-2">
-                              <Search size={32} className="mx-auto opacity-20" />
-                            </div>
-                            <div className="text-sm font-bold text-slate-400">No meals found</div>
-                            <div className="text-[10px] text-slate-300 mt-1">Try a different category or search term</div>
-                          </div>
-                        ) : (
-                          slotFilteredMenu.map((it) => {
-                            const selected = selectedDayPlan[activeSlot]?.id === it.id;
-                            return (
-                              <button
-                                key={it.id}
-                                type="button"
-                                onClick={() => toggleSlotItem(selectedDate, activeSlot, it)}
-                                className={cn(
-                                  "w-full rounded-xl border p-2.5 text-left transition-all group relative",
-                                  selected
-                                    ? "border-emerald-500 bg-emerald-50/30 shadow-sm ring-1 ring-emerald-500"
-                                    : "border-slate-100 bg-white hover:border-slate-200 hover:shadow-sm",
-                                  it.available === false && "opacity-40 cursor-not-allowed"
-                                )}
-                              >
-                                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 w-full">
-                                  <div className="flex items-center gap-3 min-w-0 w-full sm:w-auto" onClick={(e) => { e.stopPropagation(); setModalItem(it); }} style={{ cursor: 'pointer' }}>
-                                    <div className="relative shrink-0">
-                                      <img src={getItemImage(it)} alt={it.name} className="w-16 h-16 rounded-xl object-cover shadow-sm" loading="lazy" />
-                                      {selected && (
-                                        <div className="absolute -top-1.5 -right-1.5 bg-emerald-500 text-white rounded-full p-0.5 shadow-md border border-white z-10">
-                                          <Check size={10} strokeWidth={4} />
-                                        </div>
-                                      )}
-                                    </div>
-                                    <div className="min-w-0 flex-1">
-                                      <div className="font-bold text-sm text-slate-900 leading-tight mb-0.5 group-hover:text-black transition-colors">{it.name}</div>
-                                      {it.description && <div className="text-[10px] text-slate-500 line-clamp-2 leading-relaxed font-medium mb-2">{it.description}</div>}
-                                      <div className="flex items-center gap-1.5 flex-wrap">
-                                        <Pill>{it.calories} kcal</Pill>
-                                        <Pill>P{it.protein}g</Pill>
-                                        {typeof it.priceINR === "number" && (
-                                          <div className="flex items-center gap-1.5 ml-0.5">
-                                            <span className="text-[9px] font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded shadow-sm border border-emerald-100">
-                                              ₹{Math.round(it.priceINR * (1 - personalizedDiscount.value/100))}
-                                            </span>
-                                          </div>
-                                        )}
-                                      </div>
-                                    </div>
-                                  </div>
-                                  <div className="flex items-center justify-end sm:w-auto shrink-0 pt-2 border-t border-slate-50 sm:border-0 sm:pt-0">
-                                    {selected ? (
-                                      <div className="bg-emerald-50 text-emerald-700 px-3 py-1.5 rounded-lg border border-emerald-200 text-[10px] font-black uppercase tracking-wider flex items-center gap-1.5 shadow-sm shrink-0">
-                                        <span className="text-sm">✓</span> Selected
-                                      </div>
-                                    ) : (
-                                      <Button 
-                                        size="sm" 
-                                        variant="outline" 
-                                        className="h-8 px-4 rounded-lg bg-emerald-500 text-white hover:bg-emerald-600 transition-all text-[10px] font-black uppercase tracking-wider shadow-sm border-emerald-600 hover:scale-105 active:scale-95 shrink-0"
-                                        onClick={(e) => { e.stopPropagation(); toggleSlotItem(selectedDate, activeSlot, it); }}
-                                        disabled={it.available === false}
-                                      >
-                                        Add
-                                      </Button>
-                                    )}
-                                  </div>
-                                </div>
-                              </button>
-                            );
-                          })
-                        )}
+                  <div className="max-h-[420px] overflow-y-auto space-y-2 pr-1 custom-scrollbar">
+                    {sectionItems.length === 0 ? (
+                      <div className="py-12 text-center">
+                        <div className="text-slate-300 mb-2">
+                          <Search size={32} className="mx-auto opacity-20" />
+                        </div>
+                        <div className="text-sm font-bold text-slate-400">No items found</div>
+                        <div className="text-[10px] text-slate-300 mt-1">Try a different section or search term</div>
                       </div>
-                    );
-                  })()}
+                    ) : (
+                      sectionItems.map((it) => (
+                        <div
+                          key={it.id}
+                          className="w-full rounded-xl border border-slate-100 bg-white p-2.5 text-left transition-all hover:border-slate-200 hover:shadow-sm"
+                        >
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 w-full">
+                            <div className="flex items-center gap-3 min-w-0 w-full sm:w-auto cursor-pointer" onClick={() => setModalItem(it)}>
+                              <div className="relative shrink-0">
+                                <img src={getItemImage(it)} alt={it.name} className="w-16 h-16 rounded-xl object-cover shadow-sm" loading="lazy" />
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <div className="font-bold text-sm text-slate-900 leading-tight mb-0.5">{it.name}</div>
+                                {it.description && <div className="text-[10px] text-slate-500 line-clamp-2 leading-relaxed font-medium mb-2">{it.description}</div>}
+                                <div className="hidden sm:flex items-center gap-1.5 flex-wrap">
+                                  <Pill>{it.calories} kcal</Pill>
+                                  <Pill>P{it.protein}g</Pill>
+                                  {typeof it.priceINR === "number" && (
+                                    <span className="text-[9px] font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded shadow-sm border border-emerald-100">
+                                      ₹{Math.round(it.priceINR * (1 - personalizedDiscount.value/100))}
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                            <div className="flex items-center justify-between sm:justify-end sm:w-auto shrink-0 pt-2 border-t border-slate-50 sm:border-0 sm:pt-0">
+                              {/* Mobile Nutritional Pills */}
+                              <div className="flex sm:hidden items-center gap-1.5 flex-wrap">
+                                <Pill>{it.calories} kcal</Pill>
+                                <Pill>P{it.protein}g</Pill>
+                                {typeof it.priceINR === "number" && (
+                                  <span className="text-[9px] font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded shadow-sm border border-emerald-100">
+                                    ₹{Math.round(it.priceINR * (1 - personalizedDiscount.value/100))}
+                                  </span>
+                                )}
+                              </div>
+                              {isAddonSection ? (
+                                <Button 
+                                  size="sm" 
+                                  className="h-8 px-4 text-[10px] font-black uppercase tracking-wider bg-amber-500 text-white hover:bg-amber-600 border-amber-600 shadow-sm"
+                                  onClick={() => setAddonPopup(it)}
+                                  disabled={it.available === false}
+                                >
+                                  Attach Add-On
+                                </Button>
+                              ) : (
+                                <Button 
+                                  size="sm" 
+                                  className="h-8 px-4 text-[10px] font-black uppercase tracking-wider bg-emerald-600 text-white hover:bg-emerald-700 shadow-sm"
+                                  onClick={() => setPopup(it)}
+                                  disabled={it.available === false}
+                                >
+                                  Choose Meal
+                                </Button>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
                 </CardContent>
               </Card>
             </div>
           </div>
-        </div>
 
         {/* STEP 4: Checkout */}
         <div className="rounded-xl border border-black/10 p-4">
@@ -653,6 +655,25 @@ export function PersonalizedPlanView({
         </div>
       </CardContent>
     </Card>
+
+    {/* Popups */}
+    <MealPopup
+      popup={popup}
+      allowedSlots={plan.allowedSlots}
+      selectedDayPlan={selectedDayPlan}
+      maxMeals={plan.maxMeals}
+      upsertMeal={upsertMeal}
+      removeMeal={removeMeal}
+      close={() => setPopup(null)}
+    />
+    <AddonPopup
+      popup={addonPopup}
+      allowedSlots={plan.allowedSlots}
+      slotAddons={slotAddons}
+      attachAddon={attachAddon}
+      removeAddon={removeAddon}
+      close={() => setAddonPopup(null)}
+    />
   </>
   );
 }

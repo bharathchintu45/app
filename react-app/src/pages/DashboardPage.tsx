@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import type { AppUser, Route, DashboardTab, Cat, MenuItem, GroupCart, GroupOrderDraft, PlanMap, HoldsMap, StartDateMap, TargetMap, Slot, ThreadMsg } from "../types";
+import type { AppUser, Route, DashboardTab, MenuItem, GroupCart, GroupOrderDraft, PlanMap, HoldsMap, StartDateMap, TargetMap, Slot, ThreadMsg } from "../types";
+import type { SlotAddons } from "../components/dashboard/AddonPopup";
 import { buildPlanFromSubscription, sumMacros, prunePlanMapToAllowed } from "../data/menu";
 import { useMenu } from "../hooks/useMenu";
 import { dayKey, addDays, parseDateKeyToDate } from "../lib/format";
@@ -108,33 +109,55 @@ export function DashboardPage({
   const selectedDayPlan = planMap[selectedDate] || {};
   const todaysHold = holds[selectedDate] || { day: false, slots: {} as Record<Slot, boolean> };
 
-  const [activeSlot, setActiveSlot] = useState<Slot>(() => plan.allowedSlots[0] || "Slot1");
-  useEffect(() => { if (!plan.allowedSlots.includes(activeSlot)) setActiveSlot(plan.allowedSlots[0] || "Slot1"); }, [plan.allowedSlots, activeSlot]);
+  // Popup-based meal selection state
+  const [popup, setPopup] = useState<MenuItem | null>(null);
+  const [addonPopup, setAddonPopup] = useState<MenuItem | null>(null);
+  const [slotAddons, setSlotAddons] = useState<SlotAddons>({} as SlotAddons);
 
-  const [slotMenuTab, setSlotMenuTab] = useState<Cat>("Breakfast");
-  const [slotSearch, setSlotSearch] = useState("");
-  const [slotSelectedTag, setSlotSelectedTag] = useState<string | null>(null);
-
-  const availableSlotTags = useMemo(() => {
-    const tags = new Set<string>();
-    MENU.filter((m) => m.category === slotMenuTab).forEach(m => {
-      m.tags?.forEach(t => tags.add(t));
+  function upsertMeal(slot: Slot, item: MenuItem) {
+    const dayPlan = currentPlanMap[selectedDate] || {};
+    const slotAlreadyFilled = !!dayPlan[slot];
+    if (!slotAlreadyFilled) {
+      // Count how many slots currently have a meal
+      const filledCount = plan.allowedSlots.filter((s) => !!dayPlan[s]).length;
+      if (filledCount >= plan.maxMeals) {
+        showToast(`Your plan allows ${plan.maxMeals} meal${plan.maxMeals > 1 ? "s" : ""}/day. Remove a meal first or upgrade your plan.`);
+        return;
+      }
+    }
+    currentSetPlanMap((prev) => {
+      const cur = prev[selectedDate] || {};
+      return { ...prev, [selectedDate]: { ...cur, [slot]: item } };
     });
-    return Array.from(tags).sort();
-  }, [MENU, slotMenuTab]);
+  }
 
-  const slotFilteredMenu = useMemo(() => {
-    const q = slotSearch.trim().toLowerCase();
-    return MENU
-      .filter((m) => m.category === slotMenuTab)
-      .filter((m) => !q || m.name.toLowerCase().includes(q))
-      .filter((m) => !slotSelectedTag || m.tags?.includes(slotSelectedTag));
-  }, [MENU, slotMenuTab, slotSearch, slotSelectedTag]);
+  function removeMeal(slot: Slot) {
+    currentSetPlanMap((prev) => {
+      const cur = prev[selectedDate] || {};
+      return { ...prev, [selectedDate]: { ...cur, [slot]: null } };
+    });
+  }
 
-  // Reset tag when category changes
-  useEffect(() => {
-    setSlotSelectedTag(null);
-  }, [slotMenuTab]);
+  function attachAddon(slot: Slot, item: MenuItem) {
+    setSlotAddons((prev) => {
+      const list = [...(prev[slot] || [])];
+      const idx = list.findIndex((a) => a.item.id === item.id);
+      if (idx >= 0) list[idx] = { ...list[idx], qty: list[idx].qty + 1 };
+      else list.push({ item, qty: 1 });
+      return { ...prev, [slot]: list };
+    });
+  }
+
+  function removeAddon(slot: Slot, item: MenuItem) {
+    setSlotAddons((prev) => {
+      const list = [...(prev[slot] || [])];
+      const idx = list.findIndex((a) => a.item.id === item.id);
+      if (idx < 0) return prev;
+      if (list[idx].qty <= 1) list.splice(idx, 1);
+      else list[idx] = { ...list[idx], qty: list[idx].qty - 1 };
+      return { ...prev, [slot]: list };
+    });
+  }
 
   const chatSetting = useAppSetting("chat_enabled", true);
   const cutoffSetting = useAppSettingNumber("order_cutoff_hour", 22);
@@ -192,10 +215,19 @@ export function DashboardPage({
 
   function toggleSlotItem(dateKey: string, slot: Slot, item: MenuItem) {
     if (item.available === false) return;
+    const dayPlan = currentPlanMap[dateKey] || {};
+    const currentItem = dayPlan[slot];
+    const isRemoving = (currentItem as MenuItem | null | undefined)?.id === item.id;
+    if (!isRemoving && !currentItem) {
+      const filledCount = plan.allowedSlots.filter((s) => !!dayPlan[s]).length;
+      if (filledCount >= plan.maxMeals) {
+        showToast(`Your plan allows ${plan.maxMeals} meal${plan.maxMeals > 1 ? "s" : ""}/day. Remove a meal first or upgrade your plan.`);
+        return;
+      }
+    }
     currentSetPlanMap((prev) => {
       const cur = prev[dateKey] || {};
-      const currentItem = cur[slot];
-      const nextForSlot = (currentItem as MenuItem | null | undefined)?.id === item.id ? null : item;
+      const nextForSlot = (cur[slot] as MenuItem | null | undefined)?.id === item.id ? null : item;
       return { ...prev, [dateKey]: { ...cur, [slot]: nextForSlot } };
     });
   }
@@ -261,11 +293,23 @@ export function DashboardPage({
 
   const selectedMacros = useMemo(() => {
     const items = plan.allowedSlots.map((s) => selectedDayPlan[s]).filter((x): x is MenuItem => !!x && x !== null);
-    return sumMacros(items);
-  }, [plan.allowedSlots, selectedDayPlan]);
+    const base = sumMacros(items);
+    // Add addon macros (qty-weighted)
+    for (const slot of plan.allowedSlots) {
+      const addons = slotAddons[slot] || [];
+      for (const a of addons) {
+        base.calories += (a.item.calories || 0) * a.qty;
+        base.protein += (a.item.protein || 0) * a.qty;
+        base.carbs += (a.item.carbs || 0) * a.qty;
+        base.fat += (a.item.fat || 0) * a.qty;
+        base.fiber += (a.item.fiber || 0) * a.qty;
+      }
+    }
+    return base;
+  }, [plan.allowedSlots, selectedDayPlan, slotAddons]);
 
   const defaultTargets = useMemo(() => {
-    const meals = plan.allowedSlots.length;
+    const meals = plan.maxMeals;
     return {
       calories: meals === 3 ? 1400 : 550,
       protein: meals === 3 ? 90 : 35,
@@ -405,20 +449,20 @@ export function DashboardPage({
                setRoute={setRoute}
                copyToNextDay={copyToNextDay}
                repeatForProjected={repeatForProjected}
-               activeSlot={activeSlot}
-               setActiveSlot={setActiveSlot}
                selectedDayPlan={selectedDayPlan}
-               slotSearch={slotSearch}
-               setSlotSearch={setSlotSearch}
-               slotMenuTab={slotMenuTab}
-               setSlotMenuTab={setSlotMenuTab}
-               slotFilteredMenu={slotFilteredMenu}
                toggleSlotItem={toggleSlotItem}
                setModalItem={setModalItem}
-               slotSelectedTag={slotSelectedTag}
-               setSlotSelectedTag={setSlotSelectedTag}
-               availableSlotTags={availableSlotTags}
                hasActiveSubscription={!!(activeSubscription && activeSubscription.status === "active")}
+               menu={MENU}
+               slotAddons={slotAddons}
+               popup={popup}
+               setPopup={setPopup}
+               addonPopup={addonPopup}
+               setAddonPopup={setAddonPopup}
+               upsertMeal={upsertMeal}
+               removeMeal={removeMeal}
+               attachAddon={attachAddon}
+               removeAddon={removeAddon}
              />
           )}
 

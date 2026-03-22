@@ -1,27 +1,30 @@
 import { useState, useEffect, useRef } from "react";
 import { supabase } from "../lib/supabase";
 import type { AppUser } from "../types";
-import { Package, MapPin, CheckCircle2, Navigation, X, Zap, Delete, AlertTriangle, ShieldAlert, MessageCircle } from "lucide-react";
+import { MapPin, Navigation, X, AlertTriangle, MessageCircle, CheckCircle, Package, Truck, Phone } from "lucide-react";
+import { useAppSettingString } from "../hooks/useAppSettings";
 import { Button } from "../components/ui/Button";
 import { cn } from "../lib/utils";
-import { motion, AnimatePresence } from "framer-motion";
 import { formatTimeIndia } from "../lib/format";
 
-import confetti from 'canvas-confetti';
-
 export function DeliveryPage({ user, onBack, showToast }: { user: AppUser | null, onBack: () => void, showToast: (msg: string) => void }) {
+  const supportPhoneRes = useAppSettingString("support_phone", "08500929080");
+
   const [assignments, setAssignments] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [deliveryBoy, setDeliveryBoy] = useState<any>(null);
   
-  // OTP Verification State
   const [otpModalOpen, setOtpModalOpen] = useState(false);
   const [otpValue, setOtpValue] = useState("");
   const [verifyingAssignment, setVerifyingAssignment] = useState<any>(null);
   const [isVerifying, setIsVerifying] = useState(false);
-  const [deliverySuccess, setDeliverySuccess] = useState(false);
   const otpInputRef = useRef<HTMLInputElement>(null);
 
+  // Failure Modal State
+  const [failModalOpen, setFailModalOpen] = useState(false);
+  const [failingAssignment, setFailingAssignment] = useState<any>(null);
+  const [failReason, setFailReason] = useState("");
+  const [isFailing, setIsFailing] = useState(false);
 
   useEffect(() => {
     if (!user) return;
@@ -33,7 +36,7 @@ export function DeliveryPage({ user, onBack, showToast }: { user: AppUser | null
       .subscribe();
 
     return () => { supabase.removeChannel(channel); };
-  }, [user]);
+  }, [user?.id]);
 
   async function fetchData(isInitial = false) {
     if (isInitial) setLoading(true);
@@ -46,11 +49,12 @@ export function DeliveryPage({ user, onBack, showToast }: { user: AppUser | null
       const { data: aData } = await supabase
         .from('delivery_assignments')
         .select(`
-          id, status, assigned_at, order_id, delivery_notes,
-          orders ( order_number, customer_name, delivery_details, status, id, meta, kind )
+          id, status, assigned_at, order_id, delivery_notes, delivered_at,
+          orders ( order_number, customer_name, delivery_details, status, id, meta, kind, order_items ( item_name, quantity ) )
         `)
         .eq('delivery_boy_id', boyId)
-        .order('assigned_at', { ascending: false });
+        .order('assigned_at', { ascending: false })
+        .limit(50);
 
       if (aData) setAssignments(aData);
     }
@@ -75,7 +79,7 @@ export function DeliveryPage({ user, onBack, showToast }: { user: AppUser | null
         const { data: order } = await supabase.from('orders').select('meta').eq('id', assignment.order_id).single();
         const currentMeta = order?.meta || {};
         
-        // Only generate OTP if one doesn't already exist (it's now generated at checkout)
+        // Only generate OTP if one doesn't already exist
         const generatedOtp = currentMeta.delivery_otp || Math.floor(1000 + Math.random() * 9000).toString();
         metaUpdate = { delivery_otp: generatedOtp };
         
@@ -84,7 +88,7 @@ export function DeliveryPage({ user, onBack, showToast }: { user: AppUser | null
           status: 'out_for_delivery'
         }).eq('id', assignment.order_id);
       }
-      showToast(`✅ Picked up! OTP ${metaUpdate.delivery_otp ? 'confirmed' : 'generated'} for delivery.`);
+      showToast(`✅ Order marked as Picked Up.`);
     }
     await updateStatusCore(assignmentId, newStatus);
   }
@@ -93,10 +97,8 @@ export function DeliveryPage({ user, onBack, showToast }: { user: AppUser | null
     setVerifyingAssignment(assignment);
     setOtpValue("");
     setOtpModalOpen(true);
-    // Focus with a slight delay to ensure modal is rendered
     setTimeout(() => otpInputRef.current?.focus(), 150);
   }
-
 
   async function confirmDelivery() {
     if (!verifyingAssignment) return;
@@ -108,50 +110,69 @@ export function DeliveryPage({ user, onBack, showToast }: { user: AppUser | null
     const correctOtp = order?.meta?.delivery_otp;
     
     if (otpValue === correctOtp) {
-      // Success effect
-      confetti({
-        particleCount: 150,
-        spread: 70,
-        origin: { y: 0.6 },
-        colors: ['#6366f1', '#10b981', '#f59e0b']
-      });
-
-      // Mark order as delivered
       await supabase.from('orders').update({ status: 'delivered' }).eq('id', orderId);
       const ok = await updateStatusCore(verifyingAssignment.id, 'delivered');
       if (ok) {
-        setDeliverySuccess(true);
-        // Auto-close after success animation
-        setTimeout(() => {
-          setOtpModalOpen(false);
-          setDeliverySuccess(false);
-        }, 2500);
+        setOtpModalOpen(false);
+        showToast("✅ Delivery successful!");
       }
     } else {
-      showToast("❌ Incorrect PIN. Please ask the customer for the correct 4-digit code.");
+      showToast("❌ Incorrect PIN. Please try again.");
     }
     setIsVerifying(false);
   }
 
+  function handleFailedClick(assignment: any) {
+    setFailingAssignment(assignment);
+    setFailReason("");
+    setFailModalOpen(true);
+  }
+
+  async function confirmFailure() {
+    if (!failingAssignment) return;
+    setIsFailing(true);
+
+    const orderId = failingAssignment.order_id;
+    const { data: order } = await supabase.from('orders').select('meta').eq('id', orderId).single();
+    const newMeta = { ...(order?.meta || {}), cancellation_reason: failReason || "No reason provided", cancelled_by: 'delivery' };
+
+    await supabase.from('orders').update({ status: 'cancelled', meta: newMeta }).eq('id', orderId);
+    
+    // We intentionally don't update delivery_assignments status to 'cancelled' to avoid DB constraint issues
+    // The active/delivered lists will filter out cancelled orders automatically
+    fetchData(); 
+    
+    setFailModalOpen(false);
+    showToast("⚠️ Delivery marked as failed.");
+    setIsFailing(false);
+  }
 
   if (loading) {
     return (
-      <div className="mx-auto max-w-4xl px-4 py-8 pb-32 animate-pulse space-y-8">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div className="space-y-3">
-             <div className="w-24 h-4 bg-slate-200 rounded-full"></div>
-             <div className="w-48 h-8 bg-slate-200 rounded-lg"></div>
-             <div className="w-32 h-4 bg-slate-200 rounded-full"></div>
-          </div>
-          <div className="flex gap-3">
-             <div className="w-24 h-20 bg-slate-100 rounded-xl"></div>
-             <div className="w-24 h-20 bg-slate-100 rounded-xl"></div>
+      <div className="min-h-screen bg-gray-50 pb-24 font-sans text-gray-900">
+        <div className="bg-white border-b border-gray-200 sticky top-0 z-40">
+          <div className="max-w-xl mx-auto px-4 h-16 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+               <div className="w-10 h-10 rounded-full bg-slate-200 animate-pulse"></div>
+               <div className="space-y-2">
+                 <div className="w-24 h-4 rounded bg-slate-200 animate-pulse"></div>
+                 <div className="w-16 h-3 rounded bg-slate-200 animate-pulse"></div>
+               </div>
+            </div>
+            <div className="w-10 h-10 rounded-full bg-slate-200 animate-pulse"></div>
           </div>
         </div>
-        <div className="space-y-6">
-          <div className="w-48 h-6 bg-slate-200 rounded-md"></div>
-          <div className="w-full h-48 bg-slate-100 rounded-3xl"></div>
-          <div className="w-full h-48 bg-slate-100 rounded-3xl"></div>
+        <div className="max-w-xl mx-auto px-4 py-6">
+          <div className="grid grid-cols-3 gap-3 mb-8">
+             <div className="bg-white h-24 rounded-2xl border border-gray-100 animate-pulse"></div>
+             <div className="bg-white h-24 rounded-2xl border border-gray-100 animate-pulse"></div>
+             <div className="bg-white h-24 rounded-2xl border border-gray-100 animate-pulse"></div>
+          </div>
+          <div className="space-y-4 w-full mt-6">
+             <div className="w-1/3 h-5 bg-slate-200 rounded animate-pulse mb-4"></div>
+             <div className="bg-white p-5 rounded-3xl border border-slate-100 h-48 animate-pulse shadow-sm"></div>
+             <div className="bg-white p-5 rounded-3xl border border-slate-100 h-48 animate-pulse shadow-sm"></div>
+          </div>
         </div>
       </div>
     );
@@ -159,320 +180,316 @@ export function DeliveryPage({ user, onBack, showToast }: { user: AppUser | null
 
   if (!deliveryBoy) {
     return (
-      <div className="mx-auto max-w-xl p-8 text-center mt-20 bg-rose-50 rounded-2xl border border-rose-100 shadow-sm">
-        <AlertTriangle className="w-16 h-16 text-rose-500 mx-auto mb-4" />
-        <h2 className="text-2xl font-black text-rose-900 mb-2">Unlinked Account</h2>
-        <p className="text-rose-700 font-medium">Your account is a Delivery Partner role, but hasn't been linked to a specific vehicle profile in the system. Please ask your Admin to link your account or add you via the Team Manager.</p>
-        <Button onClick={onBack} className="mt-6 bg-slate-900 text-white">Return Home</Button>
+      <div className="min-h-screen bg-gray-50 p-6 flex flex-col items-center justify-center text-center">
+        <AlertTriangle className="w-16 h-16 text-red-500 mb-4" />
+        <h2 className="text-2xl font-bold text-gray-900 mb-2">Account Not Linked</h2>
+        <p className="text-gray-600 mb-6 max-w-sm">Your delivery partner account has not been fully set up. Please contact the administrator.</p>
+        <Button onClick={onBack} variant="outline">Return Home</Button>
       </div>
     );
   }
 
-  const active = assignments.filter(a => a.status === 'assigned' || a.status === 'picked_up' || a.status === 'out_for_delivery');
-  const delivered = assignments.filter(a => a.status === 'delivered');
+  const active = assignments.filter(a => {
+    const order = Array.isArray(a.orders) ? a.orders[0] : a.orders;
+    if (order?.status === 'cancelled') return false;
+    return a.status === 'assigned' || a.status === 'picked_up' || a.status === 'out_for_delivery';
+  });
 
-  const container = {
-    hidden: { opacity: 0 },
-    show: {
-      opacity: 1,
-      transition: {
-        staggerChildren: 0.15
-      }
-    }
-  };
-
-  const item = {
-    hidden: { opacity: 0, y: 30, scale: 0.95 },
-    show: { opacity: 1, y: 0, scale: 1, transition: { type: "spring" as const, damping: 20 } }
-  };
+  const delivered = assignments.filter(a => {
+    const order = Array.isArray(a.orders) ? a.orders[0] : a.orders;
+    if (order?.status === 'cancelled') return false;
+    return a.status === 'delivered';
+  });
 
   return (
-    <div className="mx-auto max-w-lg min-h-screen bg-slate-50 text-slate-900 pb-40 transition-all duration-700" style={{ fontFamily: '"Inter", sans-serif' }}>
-      {/* Velocity Header */}
-      <div className="sticky top-0 z-50 bg-white/80 backdrop-blur-xl px-6 py-5 flex items-center justify-between border-b border-slate-200/50">
-        <div className="flex flex-col">
-           <h1 className="text-xl font-black tracking-tight text-slate-900">Velocity::Logistics</h1>
-           <div className="flex items-center gap-2">
-              <div className="w-2 h-2 rounded-full bg-orange-500 shadow-[0_0_8px_rgba(249,115,22,0.4)] animate-pulse" />
-              <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">Agent::Active</span>
-           </div>
+    <div className="min-h-screen bg-gray-50 pb-24 font-sans text-gray-900">
+      {/* Header */}
+      <div className="bg-white border-b border-gray-200 sticky top-0 z-40">
+        <div className="max-w-xl mx-auto px-4 h-16 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+             <div className="w-10 h-10 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-600">
+               <Truck size={20} />
+             </div>
+             <div>
+               <h1 className="text-lg font-bold leading-tight">Delivery Hub</h1>
+               <div className="flex items-center gap-1.5">
+                 <div className="w-2 h-2 rounded-full bg-emerald-500"></div>
+                 <span className="text-xs font-medium text-gray-500">Online & Active</span>
+               </div>
+             </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <a href={`tel:${supportPhoneRes.value}`} className="flex items-center gap-1.5 px-3 py-1.5 text-blue-600 hover:text-blue-700 bg-blue-50 hover:bg-blue-100 rounded-full transition-colors text-xs font-bold uppercase tracking-widest">
+              <Phone size={14} /> Support
+            </a>
+            <button onClick={onBack} className="p-2 text-gray-400 hover:text-gray-700 bg-gray-100 rounded-full transition-colors">
+              <X size={20} />
+            </button>
+          </div>
         </div>
-        <button onClick={onBack} className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center text-slate-500 hover:text-slate-900 hover:bg-slate-200 active:scale-95 transition-all">
-          <X size={18} />
-        </button>
       </div>
 
-      <div className="px-6 pt-8 space-y-10">
-        {/* Kinetic Metrics */}
-        <div className="grid grid-cols-3 gap-3">
-           <div className="p-4 rounded-3xl bg-white shadow-sm border border-slate-100">
-              <span className="text-[9px] font-black uppercase tracking-widest text-slate-400 block mb-1">Earnings</span>
-              <span className="text-lg font-black text-slate-900">₹940</span>
+      <div className="max-w-xl mx-auto px-4 py-6">
+        {/* Stats */}
+        <div className="grid grid-cols-3 gap-3 mb-8">
+           <div className="bg-white p-3 rounded-2xl shadow-sm border border-gray-100 flex flex-col items-center justify-center">
+              <span className="text-gray-500 text-xs font-medium mb-1">Today's Earnings</span>
+              <span className="text-lg font-bold text-gray-900">₹940</span>
            </div>
-           <div className="p-4 rounded-3xl bg-white shadow-sm border border-slate-100">
-              <span className="text-[9px] font-black uppercase tracking-widest text-slate-400 block mb-1">Deliveries</span>
-              <span className="text-lg font-black text-slate-900">{delivered.length}</span>
+           <div className="bg-white p-3 rounded-2xl shadow-sm border border-gray-100 flex flex-col items-center justify-center">
+              <span className="text-gray-500 text-xs font-medium mb-1">Delivered</span>
+              <span className="text-lg font-bold text-gray-900">{delivered.length}</span>
            </div>
-           <div className="p-4 rounded-3xl bg-white shadow-sm border border-slate-100">
-              <span className="text-[9px] font-black uppercase tracking-widest text-slate-400 block mb-1">Rating</span>
-              <span className="text-lg font-black text-slate-900">4.9</span>
+           <div className="bg-white p-3 rounded-2xl shadow-sm border border-gray-100 flex flex-col items-center justify-center">
+              <span className="text-gray-500 text-xs font-medium mb-1">Rating</span>
+              <span className="text-lg font-bold text-gray-900">4.9</span>
            </div>
         </div>
 
+        {/* Active Assignments */}
+        <h2 className="text-sm font-bold text-gray-900 uppercase tracking-wider mb-4">Active Orders ({active.length})</h2>
+
         {active.length === 0 ? (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="pt-24 text-center">
-             <div className="w-24 h-24 mx-auto mb-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-300">
-               <motion.div animate={{ rotate: 360 }} transition={{ duration: 10, repeat: Infinity, ease: "linear" }}>
-                 <Zap size={32} strokeWidth={1.5} />
-               </motion.div>
+           <div className="bg-white rounded-2xl p-8 text-center shadow-sm border border-gray-100">
+             <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4 text-gray-400">
+                <Package size={28} />
              </div>
-             <h3 className="text-xs font-black text-slate-400 uppercase tracking-[0.2em]">Awaiting Assignments</h3>
-          </motion.div>
+             <h3 className="text-gray-900 font-semibold mb-1">No pending orders</h3>
+             <p className="text-gray-500 text-sm">You'll receive a notification when a new order is assigned to you.</p>
+           </div>
         ) : (
-          <motion.div variants={container} initial="hidden" animate="show" className="space-y-8 pb-20">
-            <AnimatePresence mode="popLayout">
-              {active.map(a => {
-                const order = a.orders;
+           <div className="space-y-4">
+             {active.map(a => {
+                const order = Array.isArray(a.orders) ? a.orders[0] : a.orders;
                 const details = order?.delivery_details || {};
-                const isPickedUp = a.status === 'picked_up';
-                const mapUri = details.lat ? `https://www.google.com/maps/search/?api=1&query=${details.lat},${details.lng}` : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(details.address || "")}`;
+                const isPickedUp = a.status === 'picked_up' || a.status === 'out_for_delivery';
+                const mapUri = details.lat ? `https://www.google.com/maps/search/?api=1&query=${details.lat},${details.lng}` : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent([details.building, details.street, details.area].filter(Boolean).join(", ") || "")}`;
 
                 return (
-                  <motion.div key={a.id} variants={item} layout
-                    className="relative p-8 rounded-[3.5rem] bg-white border border-slate-100 shadow-[0_40px_80px_rgba(15,23,42,0.08)] overflow-hidden group"
-                  >
-                    <div className="flex items-center justify-between mb-10">
-                       <div className="flex items-center gap-2">
-                         <div className="w-1.5 h-1.5 rounded-full bg-orange-500 animate-pulse" />
-                         <div className="text-[10px] font-black text-slate-900 tracking-[0.2em] uppercase">
-                           Mission::{order?.order_number || order?.id?.slice(0,6)}
+                  <div key={a.id} className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+                    <div className="p-4 border-b border-gray-100 flex items-center justify-between">
+                       <span className="font-semibold text-gray-900">Order #{order?.order_number || order?.id?.slice(0,6)}</span>
+                       <span className="text-xs font-medium bg-blue-50 text-blue-700 px-2 py-1 rounded-md">
+                         {isPickedUp ? 'Out for Delivery' : 'Assigned'}
+                       </span>
+                    </div>
+
+                    <div className="p-5">
+                       {/* Pickup Details */}
+                       <div className="flex gap-4 mb-6 relative">
+                         {/* Connecting line */}
+                         <div className="absolute left-[11px] top-6 bottom-[-30px] w-0.5 bg-gray-200"></div>
+                         
+                         <div className={cn("w-6 h-6 rounded-full flex items-center justify-center shrink-0 z-10", isPickedUp ? "bg-gray-200 text-gray-500" : "bg-emerald-500 text-white")}>
+                           <Package size={14} />
+                         </div>
+                         <div>
+                           <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Pickup From</p>
+                           <p className="font-semibold text-gray-900">The Fit Bowls Hub</p>
+                           <p className="text-sm text-gray-600">Kitchen HQ · Sector 44</p>
                          </div>
                        </div>
-                       <div className="px-4 py-1.5 rounded-full bg-slate-900 text-white text-[8px] font-black uppercase tracking-[0.2em]">
-                         High Priority
+
+                       {/* Delivery Details */}
+                       <div className="flex gap-4">
+                         <div className={cn("w-6 h-6 rounded-full flex items-center justify-center shrink-0 z-10", isPickedUp ? "bg-blue-500 text-white" : "bg-gray-200 text-gray-500")}>
+                           <MapPin size={14} />
+                         </div>
+                         <div className="flex-1">
+                           <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Deliver To</p>
+                           <p className="font-semibold text-gray-900">{order?.customer_name || "Customer"}</p>
+                           <p className="text-sm text-gray-800 font-medium mb-1">{details.receiverPhone || "No phone provided"}</p>
+                           <p className="text-sm text-gray-600 line-clamp-2">
+                             {details.locationType && <span className="inline-block bg-gray-200 text-gray-800 text-[10px] uppercase font-bold px-1.5 py-0.5 rounded mr-1.5">{details.locationType}</span>}
+                             {details.building}, {details.street ? details.street + ', ' : ''}{details.area}
+                           </p>
+                           
+                           {isPickedUp && (
+                             <div className="flex gap-2 mt-4">
+                               <a href={mapUri} target="_blank" rel="noopener noreferrer" className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-900 rounded-xl text-sm font-semibold transition-colors">
+                                 <Navigation size={16} className="text-blue-600" /> Map
+                               </a>
+                               <a href={`https://wa.me/${(details.receiverPhone || "").replace(/\D/g, '')}`} target="_blank" rel="noopener noreferrer" className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-900 rounded-xl text-sm font-semibold transition-colors">
+                                 <MessageCircle size={16} className="text-emerald-600" /> WhatsApp
+                               </a>
+                             </div>
+                           )}
+                         </div>
+                       </div>
+
+                       {/* Order Items */}
+                       <div className="mt-5 pt-4 border-t border-gray-100">
+                         <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Order Items</p>
+                         <ul className="space-y-1.5">
+                           {(order?.order_items || []).map((item: any, idx: number) => (
+                             <li key={idx} className="text-sm flex justify-between items-start gap-4">
+                               <span className="text-gray-900">{item.item_name || 'Unknown Item'}</span>
+                               <span className="text-gray-500 font-medium whitespace-nowrap">x{item.quantity}</span>
+                             </li>
+                           ))}
+                           {(!order?.order_items || order.order_items.length === 0) && order?.meta?.cart && Object.entries(order.meta.cart).map(([key, qty], idx) => (
+                             <li key={idx} className="text-sm flex justify-between items-start gap-4">
+                               <span className="text-gray-900">{key}</span>
+                               <span className="text-gray-500 font-medium whitespace-nowrap">x{qty as number}</span>
+                             </li>
+                           ))}
+                           {(!order?.order_items || order.order_items.length === 0) && (!order?.meta?.cart) && order?.meta?.scheduleLines && order.meta.scheduleLines.filter((l: any) => l.qty > 0).map((l: any, idx: number) => (
+                             <li key={idx} className="text-sm flex justify-between items-start gap-4">
+                               <span className="text-gray-900">{l.label || l.itemId}</span>
+                               <span className="text-gray-500 font-medium whitespace-nowrap">x{l.qty}</span>
+                             </li>
+                           ))}
+                         </ul>
                        </div>
                     </div>
 
-                    {/* Premium Liquid Timeline */}
-                    <div className="relative pl-14">
-                      <div className="absolute left-[27px] top-8 bottom-12 w-1.5 bg-slate-50 rounded-full overflow-hidden backdrop-blur-sm">
-                         <motion.div 
-                           initial={{ height: 0 }} 
-                           animate={{ height: isPickedUp ? '100%' : '50%' }} 
-                           className="w-full bg-gradient-to-bottom from-slate-900 via-slate-800 to-slate-900" 
-                         />
-                      </div>
-                      
-                      {/* Node: Pickup */}
-                      <div className={cn("relative mb-14 transition-all duration-700", isPickedUp ? "opacity-20 scale-95" : "opacity-100")}>
-                        <div className={cn(
-                          "absolute -left-[54px] top-1 w-12 h-12 rounded-full flex items-center justify-center transition-all duration-700 shadow-xl",
-                          !isPickedUp ? "bg-slate-900 text-white shadow-slate-900/30" : "bg-slate-50 text-slate-300"
-                        )}>
-                          <Package size={20} />
-                        </div>
-                        <h4 className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 mb-1.5">Origin Point</h4>
-                        <p className="text-2xl font-black text-slate-900 tracking-tight leading-none">The Fit Bowls Hub</p>
-                        <p className="text-[11px] font-bold text-slate-400 mt-2">Kitchen HQ · Sector 44</p>
-                      </div>
-
-                      {/* Node: Delivery */}
-                      <div className={cn("relative transition-all duration-700", !isPickedUp ? "opacity-20 translate-y-4" : "opacity-100 translate-y-0")}>
-                        <div className={cn(
-                          "absolute -left-[54px] top-1 w-12 h-12 rounded-full flex items-center justify-center transition-all duration-700 shadow-2xl",
-                          isPickedUp ? "bg-orange-500 text-white shadow-[0_15px_30px_rgba(249,115,22,0.4)]" : "bg-slate-50 text-slate-300"
-                        )}>
-                          <MapPin size={20} />
-                        </div>
-                        <h4 className="text-[10px] font-black uppercase tracking-[0.2em] text-orange-500 mb-1.5">Target Point</h4>
-                        <p className="text-2xl font-black text-slate-900 tracking-tighter leading-none">{order?.customer_name || "Valued Client"}</p>
-                        <p className="text-[13px] font-bold text-slate-500 mt-3 leading-snug max-w-[200px]">
-                          {details.building}, {details.area}
-                        </p>
-                        
-                        {isPickedUp && (
-                          <div className="mt-10">
-                            {/* Split-Pill action bar */}
-                            <div className="flex overflow-hidden rounded-3xl bg-slate-50 border border-slate-100 shadow-sm">
-                              <a href={mapUri} target="_blank" rel="noopener noreferrer" className="flex-1 h-16 flex items-center justify-center gap-3 bg-slate-900 text-white hover:bg-black transition-all text-[11px] font-black uppercase tracking-widest active:scale-95">
-                                <Navigation size={14} fill="white" className="rotate-45" /> Navigate
-                              </a>
-                              <div className="w-[1px] bg-slate-200" />
-                              <a 
-                                href={`https://wa.me/${(details.receiverPhone || "").replace(/\D/g, '')}`} 
-                                target="_blank" 
-                                rel="noopener noreferrer" 
-                                className="w-20 h-16 flex items-center justify-center bg-white text-slate-900 hover:bg-slate-50 transition-all active:scale-95"
-                              >
-                                <MessageCircle size={20} />
-                              </a>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Premium Action Block */}
-                    <div className="mt-14 pt-10 border-t border-slate-50">
+                    <div className="p-4 bg-gray-50 border-t border-gray-100">
                       {!isPickedUp ? (
-                         <motion.button 
-                           whileTap={{ scale: 0.96 }}
+                         <Button 
                            onClick={() => updateStatus(a.id, 'picked_up')} 
-                           className="w-full h-16 rounded-full bg-slate-900 text-white font-black text-xs uppercase tracking-[0.25em] shadow-[0_20px_40px_rgba(15,23,42,0.2)] hover:bg-black transition-all flex items-center justify-center gap-3"
+                           className="w-full bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl h-12 text-base font-semibold"
                          >
-                           Initiate Mission <Zap size={14} />
-                         </motion.button>
+                           Mark as Picked Up
+                         </Button>
                       ) : (
-                         <div className="w-full space-y-6">
-                            <motion.button 
-                              whileTap={{ scale: 0.96 }}
-                              onClick={() => handleDeliverClick(a)} 
-                              className="group relative w-full h-24 rounded-[2.5rem] bg-gradient-to-r from-orange-500 to-orange-400 text-white overflow-hidden shadow-[0_25px_50px_-12px_rgba(249,115,22,0.5)] active:shadow-none transition-all"
-                            >
-                               <div className="relative z-10 flex flex-col items-center justify-center gap-1">
-                                 <span className="text-[10px] font-black uppercase tracking-[0.3em] opacity-80">Protocol::Handover</span>
-                                 <span className="text-sm font-black uppercase tracking-[0.2em]">Complete Delivery</span>
-                               </div>
-                               <div className="absolute inset-0 bg-white/10 opacity-0 group-hover:opacity-100 transition-opacity" />
-                            </motion.button>
-                            <div className="flex items-center justify-center gap-3 text-[10px] font-bold uppercase tracking-[0.15em] text-slate-300">
-                               <div className="h-[1px] w-4 bg-slate-100" />
-                               <ShieldAlert size={14} className="text-slate-200" /> 
-                               <span>Verified Authentication</span>
-                               <div className="h-[1px] w-4 bg-slate-100" />
-                            </div>
+                         <div className="flex gap-2">
+                           <Button 
+                             onClick={() => handleFailedClick(a)} 
+                             variant="outline"
+                             className="w-1/3 bg-white hover:bg-rose-50 border-gray-200 text-rose-600 rounded-xl h-12 text-sm font-semibold"
+                           >
+                             Report Issue
+                           </Button>
+                           <Button 
+                             onClick={() => handleDeliverClick(a)} 
+                             className="flex-1 bg-blue-600 hover:bg-blue-700 text-white rounded-xl h-12 text-base font-semibold"
+                           >
+                             Deliver Order
+                           </Button>
                          </div>
                       )}
                     </div>
-                  </motion.div>
+                  </div>
                 )
-              })}
-            </AnimatePresence>
-          </motion.div>
+             })}
+           </div>
+        )}
+
+        {/* past deliveries */}
+        {delivered.length > 0 && (
+          <div className="mt-8">
+            <h2 className="text-sm font-bold text-gray-900 uppercase tracking-wider mb-4">Completed Deliveries</h2>
+            <div className="space-y-4">
+          {delivered.map(d => {
+            const order = Array.isArray(d.orders) ? d.orders[0] : d.orders;
+            return (
+              <div key={d.id} className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 flex items-center gap-4 justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-full bg-emerald-50 flex items-center justify-center text-emerald-600">
+                       <CheckCircle size={20} />
+                    </div>
+                    <div>
+                      <p className="font-semibold text-gray-900 text-sm">Order #{order?.order_number || order?.id?.slice(0,6)}</p>
+                      <p className="text-xs text-gray-500">{formatTimeIndia(d.delivered_at || d.assigned_at)}</p>
+                    </div>
+                  </div>
+                  <span className="text-sm font-bold text-emerald-600">Delivered</span>
+                </div>
+              );
+            })}
+          </div>
+          </div>
         )}
       </div>
 
-      {/* Archives */}
-      {delivered.length > 0 && (
-        <div className="px-6 mt-16 pb-20">
-           <div className="flex items-center justify-between mb-8">
-              <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Mission History</h3>
-              <div className="h-px flex-1 mx-4 bg-slate-200" />
-           </div>
-           <div className="space-y-4">
-              {delivered.map(d => (
-                <div key={d.id} className="p-5 rounded-[2.5rem] bg-white border border-slate-100 flex items-center justify-between shadow-sm">
-                   <div className="flex flex-col gap-1">
-                      <span className="text-slate-900 font-black text-sm">ORDER::{d.orders?.order_number || d.orders?.id?.slice(0,6)}</span>
-                      <span className="text-slate-400 text-[10px] font-black uppercase tracking-widest">Successful Completion</span>
-                   </div>
-                   <div className="text-slate-900 font-black text-xs px-4 py-2 bg-slate-50 rounded-full">{formatTimeIndia(d.delivered_at || d.assigned_at)}</div>
+      {/* OTP Modal */}
+      {otpModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+           <div className="bg-white w-full max-w-sm rounded-[2rem] sm:rounded-3xl p-6 sm:p-8 shadow-2xl animate-in slide-in-from-bottom-8">
+              <div className="text-center mb-6">
+                <div className="w-16 h-16 bg-blue-50 rounded-full flex items-center justify-center mx-auto mb-4 text-blue-600">
+                   <CheckCircle size={32} />
                 </div>
-              ))}
+                <h3 className="text-2xl font-bold text-gray-900 mb-1">Confirm Delivery</h3>
+                <p className="text-gray-500 text-sm">Ask the customer for their 4-digit PIN to complete the delivery.</p>
+              </div>
+
+              {/* OTP Input display & Native Keyboard Trigger */}
+              <div className="relative flex justify-center gap-3 mb-8">
+                {[...Array(4)].map((_, i) => (
+                  <div key={i} className={cn(
+                    "relative w-14 h-16 rounded-xl flex items-center justify-center text-2xl font-bold border-2 transition-all overflow-hidden",
+                    otpValue.length === i ? "border-blue-500 bg-blue-50 text-blue-700" :
+                    otpValue.length > i ? "border-gray-800 bg-gray-800 text-white" : "border-gray-200 bg-gray-50 text-gray-300"
+                  )}>
+                    {otpValue[i] || ""}
+                    {otpValue.length === i && (
+                      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[2px] h-6 bg-blue-500 animate-pulse" />
+                    )}
+                  </div>
+                ))}
+                <input
+                  ref={otpInputRef}
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  maxLength={4}
+                  value={otpValue}
+                  onChange={(e) => setOtpValue(e.target.value.replace(/\D/g, ''))}
+                  className="absolute inset-0 w-full h-full opacity-0 text-transparent bg-transparent cursor-text outline-none"
+                  autoFocus
+                />
+              </div>
+
+              <div className="flex gap-3">
+                 <Button variant="outline" className="flex-1 rounded-xl h-12" onClick={() => setOtpModalOpen(false)}>Cancel</Button>
+                 <Button 
+                   className="flex-1 rounded-xl h-12 bg-blue-600 hover:bg-blue-700 text-white text-base font-semibold"
+                   disabled={otpValue.length < 4 || isVerifying}
+                   onClick={confirmDelivery}
+                 >
+                   {isVerifying ? "Verifying..." : "Confirm"}
+                 </Button>
+              </div>
            </div>
         </div>
       )}
 
-      {/* Velocity OTP Modal */}
-      <AnimatePresence>
-        {otpModalOpen && (
-          <motion.div 
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[100] bg-slate-900/60 backdrop-blur-sm flex flex-col justify-end"
-          >
-            <motion.div 
-              initial={{ y: "100%" }}
-              animate={{ y: 0 }}
-              exit={{ y: "100%" }}
-              transition={{ type: "spring", damping: 30, stiffness: 300 }}
-              className="bg-white p-10 rounded-t-[4rem] shadow-2xl"
-            >
-              <div className="w-12 h-1.5 bg-slate-100 rounded-full mx-auto mb-10" />
-              
-              <div className="text-center mb-10">
-                <h2 className="text-2xl font-black text-slate-900 tracking-tight">Verify Delivery</h2>
-                <p className="text-slate-400 text-xs font-bold mt-2">Enter the 4-digit protocol code</p>
+      {/* Fail Modal */}
+      {failModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+           <div className="bg-white w-full max-w-sm rounded-[2rem] sm:rounded-3xl p-6 sm:p-8 shadow-2xl animate-in slide-in-from-bottom-8">
+              <div className="text-center mb-6">
+                <div className="w-16 h-16 bg-rose-50 rounded-full flex items-center justify-center mx-auto mb-4 text-rose-600">
+                   <AlertTriangle size={32} />
+                </div>
+                <h3 className="text-2xl font-bold text-gray-900 mb-1">Report Issue</h3>
+                <p className="text-gray-500 text-sm">Cancel the delivery and return items to kitchen.</p>
               </div>
 
-              {/* Kinetic OTP Input */}
-              <div className="flex justify-center gap-4 mb-12">
-                {[...Array(4)].map((_, i) => (
-                  <div key={i} className={cn(
-                    "w-16 h-20 rounded-3xl flex items-center justify-center text-3xl font-black border-4 transition-all duration-200",
-                    otpValue.length > i ? "border-slate-900 text-slate-900 bg-slate-50" : "border-slate-50 text-slate-200 bg-transparent"
-                  )}>
-                    {otpValue[i] || "•"}
-                  </div>
-                ))}
+              <div className="mb-6">
+                <label className="block text-sm font-semibold text-gray-700 mb-2">Reason</label>
+                <textarea
+                  className="w-full h-24 p-3 rounded-xl border border-gray-200 bg-gray-50 text-gray-900 outline-none focus:ring-2 focus:ring-rose-500/20 focus:border-rose-500 transition-all resize-none"
+                  placeholder="e.g. Customer unreachable, address incorrect..."
+                  value={failReason}
+                  onChange={e => setFailReason(e.target.value)}
+                />
               </div>
 
-              {/* Grid Keypad */}
-              <div className="grid grid-cols-3 gap-4 mb-10">
-                {[1,2,3,4,5,6,7,8,9].map(num => (
-                  <button key={num} onClick={() => otpValue.length < 4 && setOtpValue(prev => prev + num)} className="h-16 rounded-3xl bg-slate-50 text-xl font-black text-slate-900 hover:bg-slate-100 active:scale-95 transition-all outline-none">
-                    {num}
-                  </button>
-                ))}
-                <button onClick={() => setOtpValue("")} className="h-16 rounded-3xl bg-slate-50 text-[10px] font-black text-slate-400 uppercase tracking-widest active:scale-95 transition-all outline-none">Reset</button>
-                <button onClick={() => otpValue.length < 4 && setOtpValue(prev => prev + "0")} className="h-16 rounded-3xl bg-slate-50 text-xl font-black text-slate-900 active:scale-95 transition-all outline-none">0</button>
-                <button onClick={() => setOtpValue(prev => prev.slice(0, -1))} className="h-16 rounded-3xl bg-slate-50 flex items-center justify-center text-slate-400 active:scale-95 transition-all outline-none">
-                  <Delete size={20} />
-                </button>
-              </div>
-
-              <div className="flex flex-col gap-4">
-                 <button 
-                  disabled={otpValue.length < 4 || isVerifying}
-                  onClick={confirmDelivery}
-                  className="w-full h-16 rounded-3xl bg-slate-900 text-white font-black text-xs uppercase tracking-[0.2em] shadow-xl disabled:opacity-20 disabled:shadow-none transition-all active:scale-95"
+              <div className="flex flex-col gap-3">
+                 <Button 
+                   className="w-full rounded-xl h-12 bg-rose-600 hover:bg-rose-700 text-white text-base font-semibold border-none"
+                   disabled={isFailing}
+                   onClick={confirmFailure}
                  >
-                   {isVerifying ? "Verifying..." : "Confirm Protocol"}
-                 </button>
-                 <button onClick={() => setOtpModalOpen(false)} className="py-2 text-[10px] font-black text-slate-400 uppercase tracking-widest hover:text-slate-900 transition-colors">Cancel</button>
+                   {isFailing ? "Cancelling..." : "Confirm Return"}
+                 </Button>
+                 <Button variant="outline" className="w-full rounded-xl h-12 border-gray-200 text-gray-600" onClick={() => setFailModalOpen(false)}>Back</Button>
               </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* Kinetic Success Overlay */}
-      <AnimatePresence>
-        {deliverySuccess && (
-          <motion.div 
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[200] bg-white flex flex-col items-center justify-center text-center p-10"
-          >
-            <motion.div 
-              initial={{ scale: 0.5, rotate: -20 }}
-              animate={{ scale: 1, rotate: 0 }}
-              className="w-32 h-32 rounded-[3.5rem] bg-orange-500 flex items-center justify-center mb-8 shadow-[0_20px_40px_rgba(249,115,22,0.4)]"
-            >
-              <CheckCircle2 size={64} className="text-white" />
-            </motion.div>
-            <h1 className="text-4xl font-black text-slate-900 tracking-tight mb-3">Protocol Verified</h1>
-            <p className="text-slate-400 text-xs font-black uppercase tracking-[0.3em] animate-pulse">Mission Accomplished</p>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      <input
-        ref={otpInputRef}
-        type="text"
-        inputMode="numeric"
-        maxLength={4}
-        value={otpValue}
-        onChange={(e) => {
-          const val = e.target.value.replace(/\D/g, '');
-          setOtpValue(val);
-        }}
-        className="sr-only"
-        autoFocus
-        id="otp-hidden-input-velocity"
-      />
+           </div>
+        </div>
+      )}
     </div>
   )
 }

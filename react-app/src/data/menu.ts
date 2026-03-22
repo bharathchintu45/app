@@ -1,15 +1,11 @@
 import type { MenuItem, PlanConfig, PlanType, Duration, Macros } from "../types";
 
-export const CATS = ["Breakfast", "Lunch", "Dinner", "Snack"] as const;
+export const CATS = ["All-Day Kitchen", "Midday-Midnight Kitchen", "Add-Ons"] as const;
 
-export const PLAN_TYPES: { key: PlanType; title: string; slots: import("../types").Slot[] }[] = [
-  { key: "breakfast", title: "Breakfast only", slots: ["Slot1"] },
-  { key: "lunch", title: "Lunch only", slots: ["Slot2"] },
-  { key: "dinner", title: "Dinner only", slots: ["Slot3"] },
-  { key: "breakfast-lunch", title: "Breakfast & Lunch", slots: ["Slot1", "Slot2"] },
-  { key: "lunch-dinner", title: "Lunch & Dinner", slots: ["Slot2", "Slot3"] },
-  { key: "breakfast-dinner", title: "Breakfast & Dinner", slots: ["Slot1", "Slot3"] },
-  { key: "complete", title: "All 3 meals", slots: ["Slot1", "Slot2", "Slot3"] },
+export const PLAN_TYPES: { key: PlanType; title: string; slots: import("../types").Slot[]; maxMeals: number }[] = [
+  { key: "1meal", title: "1 meal/day", slots: ["Slot1", "Slot2", "Slot3"], maxMeals: 1 },
+  { key: "2meals", title: "2 meals/day", slots: ["Slot1", "Slot2", "Slot3"], maxMeals: 2 },
+  { key: "complete", title: "Complete (3 meals/day)", slots: ["Slot1", "Slot2", "Slot3"], maxMeals: 3 },
 ];
 
 export const DURATIONS: Duration[] = [7, 15, 30];
@@ -38,7 +34,7 @@ export function parseSubscriptionId(id: string): { type: PlanType; duration: Dur
 export function buildPlanFromSubscription(subId: string): PlanConfig {
   const { type, duration } = parseSubscriptionId(subId);
   const pt = PLAN_TYPES.find((x) => x.key === type)!;
-  return { type, title: pt.title, duration, allowedSlots: pt.slots };
+  return { type, title: pt.title, duration, allowedSlots: pt.slots, maxMeals: pt.maxMeals };
 }
 
 export function sumMacros(items: MenuItem[]): Macros {
@@ -145,7 +141,7 @@ const DEFAULT_MENU: MenuItem[] = [
     };
     return {
       id: `B-${i + 1}`,
-      category: "Breakfast" as const,
+      category: "All-Day Kitchen" as const,
       name: baseName + ` Variant ${Math.floor(i / 10) + 1}`,
       description: meta.description,
       image: meta.image,
@@ -170,7 +166,7 @@ const DEFAULT_MENU: MenuItem[] = [
     };
     return {
       id: `L-${i + 1}`,
-      category: "Lunch" as const,
+      category: "Midday-Midnight Kitchen" as const,
       name: baseName + ` Variant ${Math.floor(i / 10) + 1}`,
       description: meta.description,
       image: meta.image,
@@ -195,7 +191,7 @@ const DEFAULT_MENU: MenuItem[] = [
     };
     return {
       id: `D-${i + 1}`,
-      category: "Dinner" as const,
+      category: "Midday-Midnight Kitchen" as const,
       name: baseName + ` Variant ${Math.floor(i / 10) + 1}`,
       description: meta.description,
       image: meta.image,
@@ -218,7 +214,7 @@ const DEFAULT_MENU: MenuItem[] = [
     };
     return {
       id: `S-${i + 1}`,
-      category: "Snack" as const,
+      category: "Add-Ons" as const,
       name: baseName + ` Variant ${Math.floor(i / 5) + 1}`,
       description: meta.description,
       image: meta.image,
@@ -295,8 +291,8 @@ export function runDevTests() {
   
   // 1. Macro Summing
   const testItems: MenuItem[] = [
-    { id: "T1", category: "Breakfast", name: "T1", calories: 100, protein: 10, carbs: 20, fat: 5, fiber: 2 },
-    { id: "T2", category: "Lunch", name: "T2", calories: 200, protein: 20, carbs: 40, fat: 10, fiber: 4 },
+    { id: "T1", category: "All-Day Kitchen", name: "T1", calories: 100, protein: 10, carbs: 20, fat: 5, fiber: 2 },
+    { id: "T2", category: "Midday-Midnight Kitchen", name: "T2", calories: 200, protein: 20, carbs: 40, fat: 10, fiber: 4 },
   ];
   const sums = sumMacros(testItems);
   if (sums.calories === 300 && sums.protein === 30) console.log("[TEST] sumMacros: PASS");

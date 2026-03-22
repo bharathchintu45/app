@@ -56,6 +56,12 @@ const UserSettingsPage = React.lazy(() => import("./pages/UserSettingsPage").the
 const OrderTrackingPage = React.lazy(() => import("./pages/OrderTrackingPage").then(module => ({ default: module.OrderTrackingPage })));
 const DeliveryPage = React.lazy(() => import("./pages/DeliveryPage").then(module => ({ default: module.DeliveryPage })));
 const NotFoundPage = React.lazy(() => import("./pages/NotFoundPage").then(module => ({ default: module.NotFoundPage })));
+const PrivacyPolicyPage = React.lazy(() => import("./pages/LegalPages").then(module => ({ default: module.PrivacyPolicyPage })));
+const TermsPage = React.lazy(() => import("./pages/LegalPages").then(module => ({ default: module.TermsPage })));
+const RefundsPage = React.lazy(() => import("./pages/LegalPages").then(module => ({ default: module.RefundsPage })));
+const ShippingPage = React.lazy(() => import("./pages/LegalPages").then(module => ({ default: module.ShippingPage })));
+const AboutPage = React.lazy(() => import("./pages/LegalPages").then(module => ({ default: module.AboutPage })));
+const ContactPage = React.lazy(() => import("./pages/LegalPages").then(module => ({ default: module.ContactPage })));
 
 // MaintenancePage remains eager as it is a fallback
 import { MaintenancePage } from "./pages/MaintenancePage";
@@ -73,7 +79,7 @@ export default function App() {
   const { user, setUser } = useUser();
   const [route, setRoute] = useState<Route>(() => {
     const hash = window.location.hash.replace('#', '');
-    const validRoutes: Route[] = ["home", "login", "checkout-regular", "checkout-personal", "checkout-group", "order-confirmation", "app", "dashboard", "admin", "kitchen", "delivery", "profile", "orders", "404"];
+    const validRoutes: Route[] = ["home", "login", "checkout-regular", "checkout-personal", "checkout-group", "order-confirmation", "app", "dashboard", "admin", "kitchen", "delivery", "profile", "orders", "404", "about", "contact", "privacy", "terms", "refunds", "shipping"];
     if (hash && !validRoutes.includes(hash as Route)) return "404";
     return (hash as Route) || "home";
   });
@@ -132,7 +138,7 @@ export default function App() {
   // Helper to log route changes - memoized to prevent re-render loops in children
   const changeRoute = useCallback((newRoute: Route) => {
     // Basic validation
-    const validRoutes: Route[] = ["home", "login", "checkout-regular", "checkout-personal", "checkout-group", "order-confirmation", "app", "dashboard", "admin", "kitchen", "delivery", "profile", "orders", "404"];
+    const validRoutes: Route[] = ["home", "login", "checkout-regular", "checkout-personal", "checkout-group", "order-confirmation", "app", "dashboard", "admin", "kitchen", "delivery", "profile", "orders", "404", "about", "contact", "privacy", "terms", "refunds", "shipping"];
     if (!validRoutes.includes(newRoute)) {
       console.warn(`[App] Invalid route requested: ${newRoute}. Redirecting to 404.`);
       setRoute("404");
@@ -516,11 +522,19 @@ export default function App() {
   return (
     <ErrorBoundary>
       <React.Suspense fallback={
-        <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center p-8 text-white space-y-6">
-          <div className="w-16 h-16 border-4 border-emerald-500/30 border-t-emerald-500 rounded-full animate-spin" />
-          <div className="space-y-2 text-center">
-            <h2 className="text-xl font-black tracking-tight">The Fit Bowls</h2>
-            <p className="text-slate-400 text-sm font-medium animate-pulse">Loading your premium experience...</p>
+        <div className="min-h-screen bg-slate-50 flex flex-col">
+          <div className="h-16 bg-white border-b border-slate-100 flex items-center justify-between px-4 sm:px-6">
+            <div className="w-32 h-6 bg-slate-200 rounded-lg animate-pulse" />
+            <div className="w-10 h-10 bg-slate-200 rounded-full animate-pulse" />
+          </div>
+          <div className="p-4 sm:p-6 space-y-6 max-w-7xl mx-auto w-full mt-4">
+            <div className="w-2/3 max-w-md h-10 bg-slate-200 rounded-xl animate-pulse" />
+            <div className="w-1/2 max-w-sm h-6 bg-slate-200 rounded-lg animate-pulse" />
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-8">
+              <div className="h-48 bg-slate-200 rounded-3xl animate-pulse" />
+              <div className="h-48 bg-slate-200 rounded-3xl animate-pulse shadow-sm" />
+              <div className="h-48 bg-slate-200 rounded-3xl animate-pulse" />
+            </div>
           </div>
         </div>
       }>
@@ -653,6 +667,18 @@ export default function App() {
                     <ErrorBoundary>
                     <DeliveryPage user={user} onBack={() => changeRoute("home")} showToast={showToast} />
                     </ErrorBoundary>
+                  ) : route === "about" ? (
+                    <AboutPage onBack={() => changeRoute("home")} />
+                  ) : route === "contact" ? (
+                    <ContactPage onBack={() => changeRoute("home")} />
+                  ) : route === "privacy" ? (
+                    <PrivacyPolicyPage onBack={() => changeRoute("home")} />
+                  ) : route === "terms" ? (
+                    <TermsPage onBack={() => changeRoute("home")} />
+                  ) : route === "refunds" ? (
+                    <RefundsPage onBack={() => changeRoute("home")} />
+                  ) : route === "shipping" ? (
+                    <ShippingPage onBack={() => changeRoute("home")} />
                   ) : route === "404" ? (
                     <NotFoundPage onBack={() => changeRoute("home")} />
                   ) : route === "home" ? (
@@ -692,7 +718,7 @@ export default function App() {
             initial={{ opacity: 0, y: 50, scale: 0.9 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 20, scale: 0.9 }}
-            className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 rounded-2xl bg-slate-900 border border-slate-700 text-white px-5 py-3 shadow-2xl shadow-slate-900/40 font-medium text-sm sm:min-w-[300px] text-center"
+            className="fixed bottom-24 left-1/2 -translate-x-1/2 z-[150] rounded-2xl bg-slate-900 border border-slate-700 text-white px-5 py-3 shadow-2xl shadow-slate-900/40 font-medium text-sm sm:min-w-[300px] text-center"
           >
             {toastMsg}
           </motion.div>

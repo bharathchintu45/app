@@ -126,14 +126,6 @@ function StatusTimeline({ status }: { status: string }) {
 
 
 function SecretPINCard({ otp, isPickup }: { otp: string, isPickup?: boolean }) {
-  const [copied, setCopied] = useState(false);
-
-  function handleCopy() {
-    navigator.clipboard.writeText(otp);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  }
-
   return (
     <motion.div
       initial={{ opacity: 0, y: 12, scale: 0.97 }}
@@ -145,7 +137,7 @@ function SecretPINCard({ otp, isPickup }: { otp: string, isPickup?: boolean }) {
       <div className="pointer-events-none absolute -top-8 -right-8 w-40 h-40 bg-white/10 rounded-full blur-2xl" />
       <div className="pointer-events-none absolute -bottom-6 -left-6 w-32 h-32 bg-purple-400/20 rounded-full blur-2xl" />
 
-      <div className="relative flex items-center justify-between gap-4">
+      <div className="relative flex flex-col sm:flex-row items-start sm:items-center justify-between gap-5 sm:gap-4">
         <div className="flex items-center gap-3">
           <motion.div
             animate={{ scale: [1, 1.12, 1], opacity: [0.8, 1, 0.8] }}
@@ -156,26 +148,19 @@ function SecretPINCard({ otp, isPickup }: { otp: string, isPickup?: boolean }) {
           </motion.div>
           <div>
             <p className="text-[10px] font-black uppercase tracking-widest text-white/60 mb-0.5">🔒 {isPickup ? 'Secret Pickup PIN' : 'Secret Delivery PIN'}</p>
-            <p className="text-xs font-bold text-white/80 leading-tight">
+            <p className="text-xs font-bold text-white/80 leading-tight pr-2">
               {isPickup ? 'Show this PIN at the counter to collect your order' : 'Share with your delivery partner when they arrive'}
             </p>
           </div>
         </div>
 
         {/* PIN Digits */}
-        <div className="flex items-center gap-1.5 shrink-0">
+        <div className="flex items-center gap-1.5 shrink-0 w-full sm:w-auto mt-2 sm:mt-0 px-1 sm:px-0 justify-between sm:justify-start">
           {otp.split('').map((digit, i) => (
-            <div key={i} className="w-9 h-11 rounded-xl bg-white/20 backdrop-blur-sm border border-white/30 flex items-center justify-center">
-              <span className="text-xl font-black text-white tracking-tight">{digit}</span>
+            <div key={i} className="w-10 sm:w-10 h-12 sm:h-12 rounded-xl bg-white/20 backdrop-blur-sm border border-white/30 flex items-center justify-center">
+              <span className="text-2xl font-black text-white tracking-tight">{digit}</span>
             </div>
           ))}
-          <button
-            onClick={handleCopy}
-            className="ml-2 w-9 h-9 rounded-xl flex items-center justify-center bg-white/20 hover:bg-white/30 transition-colors border border-white/20"
-            title="Copy PIN"
-          >
-            {copied ? <Check size={15} className="text-emerald-300" /> : <Copy size={15} className="text-white/70" />}
-          </button>
         </div>
       </div>
 
