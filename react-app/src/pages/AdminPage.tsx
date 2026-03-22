@@ -416,7 +416,7 @@ function CustomersTab({ showToast }: { showToast: (msg: string) => void }) {
         id: phone, name, phone: phone.startsWith('profile-') ? 'No Phone' : phone,
         address: p.address || 'Not Provided',
         dietaryPrep: p.dietary_preferences || 'Not Provided',
-        healthCond: p.health_conditions || 'Not Provided',
+        healthCond: 'Not Provided',
         firstOrder: p.created_at || new Date().toISOString(), lastOrder: p.created_at || new Date().toISOString(),
         totalOrders: 0, totalSpent: 0, activeSub: false,
         orders: [], favorites: {}

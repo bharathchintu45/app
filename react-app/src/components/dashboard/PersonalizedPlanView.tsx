@@ -3,14 +3,14 @@ import { Card, CardHeader, CardContent } from "../ui/Card";
 import { Input } from "../ui/Input";
 import { Button } from "../ui/Button";
 import { SectionTitle } from "../ui/Typography";
-import { Sparkles, ArrowRight, Search, Flame, Beef, Wheat, Droplets, Leaf, CalendarDays, Clock, Coffee, Sun, Utensils, Copy, Repeat, Check } from "lucide-react";
+import { Sparkles, ArrowRight, Search, Flame, Beef, Wheat, Droplets, Leaf, CalendarDays, Clock, Coffee, Sun, Utensils, Copy, Repeat } from "lucide-react";
 import { formatDateIndia, slotLabel, clamp, digitsOnly, parseDateKeyToDate, dayKey, addDays } from "../../lib/format";
 import { DURATIONS, PLAN_TYPES, subscriptionId } from "../../data/menu";
 import { useAppSettingNumber } from "../../hooks/useAppSettings";
 import { cn } from "../../lib/utils";
 import { MealPopup } from "./MealPopup";
 import { AddonPopup } from "./AddonPopup";
-import type { AddonEntry, SlotAddons } from "./AddonPopup";
+import type { SlotAddons } from "./AddonPopup";
 import type { PlanConfig, Macros, MenuItem, StartDateMap, TargetMap, HoldsMap, PlanMap, Slot, DayHold } from "../../types";
 
 const MENU_SECTIONS = [
@@ -134,7 +134,7 @@ export function PersonalizedPlanView({
   copyToNextDay: _copyToNextDay,
   repeatForProjected: _repeatForProjected,
   selectedDayPlan,
-  toggleSlotItem,
+  toggleSlotItem: _toggleSlotItem,
   setModalItem,
   isLoading: _isLoading,
   defaultTargets,

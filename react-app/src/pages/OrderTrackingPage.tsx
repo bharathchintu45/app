@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "../components/ui/Button";
 import { Card, CardContent } from "../components/ui/Card";
 import { SkeletonTrackingCard } from "../components/ui/Skeleton";
-import { Package, Clock, ChefHat, Bike, CheckCircle2, RefreshCw, ArrowLeft, Phone, Info, MapPin, Navigation, ShieldCheck, Copy, Check, Ban } from "lucide-react";
+import { Package, Clock, ChefHat, Bike, CheckCircle2, RefreshCw, ArrowLeft, Phone, Info, MapPin, Navigation, ShieldCheck, Ban } from "lucide-react";
 import { cn } from "../lib/utils";
 import { useAppSetting, useAppSettingString } from "../hooks/useAppSettings";
 
