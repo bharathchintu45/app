@@ -112,7 +112,7 @@ function StaffTab({ showToast }: { showToast: (msg: string) => void }) {
     try {
       // Use an isolated Supabase client so we don't disrupt the admin's session
       const anonClient = createClient(
-        import.meta.env.VITE_SUPABASE_URL || 'https://ijnigtjlphdeafstnrxk.supabase.co',
+        import.meta.env.VITE_SUPABASE_URL || '',
         import.meta.env.VITE_SUPABASE_ANON_KEY || '',
       );
 

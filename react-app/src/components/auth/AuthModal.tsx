@@ -171,19 +171,6 @@ export function AuthModal({
   async function handleSendOtp(e: React.FormEvent) {
     e.preventDefault();
     setErrorMsg("");
-    
-    // Testing bypass
-    if (email === "test2@example.com") {
-      setLoading(true);
-      const { data, error } = await supabase.auth.signInWithPassword({ email, password: "testpassword1" });
-      if (!error && data.user) {
-        await checkAndResolveProfile(data.user.id, data.user.email ?? email);
-      } else {
-        setLoading(false);
-        setErrorMsg("Test login failed: " + error?.message);
-      }
-      return;
-    }
 
     const params: any = {
       options: { shouldCreateUser: true },
