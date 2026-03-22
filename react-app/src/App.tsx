@@ -55,6 +55,7 @@ const OrderConfirmationPage = React.lazy(() => import("./pages/CheckoutPages").t
 const UserSettingsPage = React.lazy(() => import("./pages/UserSettingsPage").then(module => ({ default: module.UserSettingsPage })));
 const OrderTrackingPage = React.lazy(() => import("./pages/OrderTrackingPage").then(module => ({ default: module.OrderTrackingPage })));
 const DeliveryPage = React.lazy(() => import("./pages/DeliveryPage").then(module => ({ default: module.DeliveryPage })));
+const ManagerPage = React.lazy(() => import("./pages/ManagerPage"));
 const NotFoundPage = React.lazy(() => import("./pages/NotFoundPage").then(module => ({ default: module.NotFoundPage })));
 const PrivacyPolicyPage = React.lazy(() => import("./pages/LegalPages").then(module => ({ default: module.PrivacyPolicyPage })));
 const TermsPage = React.lazy(() => import("./pages/LegalPages").then(module => ({ default: module.TermsPage })));
@@ -79,7 +80,7 @@ export default function App() {
   const { user, setUser } = useUser();
   const [route, setRoute] = useState<Route>(() => {
     const hash = window.location.hash.replace('#', '');
-    const validRoutes: Route[] = ["home", "login", "checkout-regular", "checkout-personal", "checkout-group", "order-confirmation", "app", "dashboard", "admin", "kitchen", "delivery", "profile", "orders", "404", "about", "contact", "privacy", "terms", "refunds", "shipping"];
+    const validRoutes: Route[] = ["home", "login", "checkout-regular", "checkout-personal", "checkout-group", "order-confirmation", "app", "dashboard", "admin", "manager", "kitchen", "delivery", "profile", "orders", "404", "about", "contact", "privacy", "terms", "refunds", "shipping"];
     if (hash && !validRoutes.includes(hash as Route)) return "404";
     return (hash as Route) || "home";
   });
@@ -138,7 +139,7 @@ export default function App() {
   // Helper to log route changes - memoized to prevent re-render loops in children
   const changeRoute = useCallback((newRoute: Route) => {
     // Basic validation
-    const validRoutes: Route[] = ["home", "login", "checkout-regular", "checkout-personal", "checkout-group", "order-confirmation", "app", "dashboard", "admin", "kitchen", "delivery", "profile", "orders", "404", "about", "contact", "privacy", "terms", "refunds", "shipping"];
+    const validRoutes: Route[] = ["home", "login", "checkout-regular", "checkout-personal", "checkout-group", "order-confirmation", "app", "dashboard", "admin", "manager", "kitchen", "delivery", "profile", "orders", "404", "about", "contact", "privacy", "terms", "refunds", "shipping"];
     if (!validRoutes.includes(newRoute)) {
       console.warn(`[App] Invalid route requested: ${newRoute}. Redirecting to 404.`);
       setRoute("404");
@@ -153,10 +154,12 @@ export default function App() {
 
   const { value: isMaintenance } = useAppSetting("maintenance_mode", false);
   const { value: bypassEmailsStr } = useAppSettingString("maintenance_bypass_emails", "info@thefreshbox.in, admin@thefreshbox.in");
+  const { value: isAdminPortalActive } = useAppSetting("admin_portal_active", true);
+  const { value: isManagerPortalActive } = useAppSetting("manager_portal_active", true);
   
   const isAuthorized = useMemo(() => {
     if (!user) return false;
-    if (user.role === 'admin' || user.role === 'kitchen' || user.role === 'delivery') return true;
+    if (user.role === 'admin' || user.role === 'manager' || user.role === 'kitchen' || user.role === 'delivery') return true;
     
     // Parse dynamic bypass emails
     const bypassEmails = bypassEmailsStr
@@ -469,6 +472,13 @@ export default function App() {
       } else if (user.role === "kitchen" || user.role === "admin") {
         changeRoute("kitchen");
       }
+    } else if (portal === "manager" && route === "home") {
+      if (!user) {
+        setAuthIntent("manager");
+        setAuthOpen(true);
+      } else if (user.role === "manager" || user.role === "admin") {
+        changeRoute("manager");
+      }
     } else if (portal === "delivery" && route === "home") {
       if (!user) {
         setAuthIntent("delivery");
@@ -571,7 +581,11 @@ export default function App() {
                   {route === "kitchen" ? (
                     <KitchenPage user={user} onBack={() => changeRoute("home")} showToast={showToast} />
                   ) : route === "admin" ? (
-                    <AdminPage user={user} onBack={() => changeRoute("home")} showToast={showToast} />
+                    isAdminPortalActive ? (
+                      <AdminPage user={user} onBack={() => changeRoute("home")} showToast={showToast} />
+                    ) : (
+                      <MaintenancePage title="Admin Portal Disabled" message="Access to the Administrative Console has been restricted by the system owner." />
+                    )
                   ) : route === "checkout-regular" ? (
                     <CheckoutRegularPage 
                       user={user} 
@@ -667,6 +681,14 @@ export default function App() {
                     <ErrorBoundary>
                     <DeliveryPage user={user} onBack={() => changeRoute("home")} showToast={showToast} />
                     </ErrorBoundary>
+                  ) : route === "manager" ? (
+                    isManagerPortalActive ? (
+                      <ErrorBoundary>
+                      <ManagerPage user={user} onBack={() => changeRoute("home")} showToast={showToast} />
+                      </ErrorBoundary>
+                    ) : (
+                      <MaintenancePage title="Manager Portal Disabled" message="The Operations Hub is currently offline. Please contact an administrator if this is unexpected." />
+                    )
                   ) : route === "about" ? (
                     <AboutPage onBack={() => changeRoute("home")} />
                   ) : route === "contact" ? (

@@ -80,25 +80,8 @@ FROM auth.users
 WHERE id NOT IN (SELECT id FROM public.profiles)
 ON CONFLICT (id) DO NOTHING;
 
--- 7. (Optional but recommended) Admin Account Force-Setup
--- If you want to log in to the admin portal, ensure this exact user exists.
-INSERT INTO auth.users (
-  id, email, encrypted_password, email_confirmed_at,
-  raw_app_meta_data, raw_user_meta_data, created_at, updated_at, role
-)
-SELECT 
-  gen_random_uuid(),
-  'admin@thefitbowls.com',
-  crypt('Admin@TFB2024!', gen_salt('bf')),
-  now(),
-  '{"provider":"email","providers":["email"]}',
-  '{}',
-  now(), now(), 'authenticated'
-WHERE NOT EXISTS (
-  SELECT 1 FROM auth.users WHERE email = 'admin@thefitbowls.com'
-);
-
--- Force the admin user's profile role to 'admin'
-UPDATE public.profiles
-SET role = 'admin'
-WHERE email = 'admin@thefitbowls.com';
+-- 7. Admin Account Setup
+-- NOTE: Do NOT use hardcoded passwords in scripts. 
+-- To create an admin, sign up normally via the app, then manually change your role 
+-- to 'admin' in the Supabase Dashboard SQL Editor:
+-- UPDATE public.profiles SET role = 'admin' WHERE email = 'your-email@example.com';

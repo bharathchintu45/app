@@ -42,7 +42,7 @@ export interface DeliveryDetails {
   isPickup?: boolean;
 }
 
-export type UserRole = "customer" | "admin" | "kitchen" | "delivery";
+export type UserRole = "customer" | "admin" | "manager" | "kitchen" | "delivery";
 
 export interface AppUser {
   id?: string;
@@ -58,10 +58,10 @@ export interface AppUser {
   healthScore?: number;
 }
 
-export type Route = "home" | "login" | "checkout-regular" | "checkout-personal" | "checkout-group" | "order-confirmation" | "app" | "dashboard" | "admin" | "kitchen" | "delivery" | "profile" | "orders" | "404" | "about" | "contact" | "privacy" | "terms" | "refunds" | "shipping";
+export type Route = "home" | "login" | "checkout-regular" | "checkout-personal" | "checkout-group" | "order-confirmation" | "app" | "dashboard" | "admin" | "manager" | "kitchen" | "delivery" | "profile" | "orders" | "404" | "about" | "contact" | "privacy" | "terms" | "refunds" | "shipping";
 
 export type DashboardTab = "personal" | "group";
-export type AuthIntent = "none" | "regular" | "personal" | "group" | "admin" | "kitchen" | "delivery";
+export type AuthIntent = "none" | "regular" | "personal" | "group" | "admin" | "manager" | "kitchen" | "delivery";
 
 export interface Macros {
   calories: number;

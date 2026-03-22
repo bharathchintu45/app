@@ -1,6 +1,9 @@
 import { Hammer, Lock, Mail } from 'lucide-react';
 
-export function MaintenancePage() {
+export function MaintenancePage({ 
+  title = "Under Maintenance", 
+  message = "We're currently optimizing the Fresh Box experience. We'll be back shortly with a smoother, faster plateau for your health goals." 
+}: { title?: string; message?: string }) {
   return (
     <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
       <div className="max-w-md w-full bg-white rounded-[2.5rem] shadow-2xl shadow-slate-200 border border-slate-100 p-8 md:p-12 text-center entrance-scale">
@@ -12,12 +15,12 @@ export function MaintenancePage() {
         </div>
         
         <h1 className="text-3xl font-black text-slate-900 tracking-tight mb-4">
-          Under <br />
-          <span className="text-emerald-500 underline decoration-emerald-200 underline-offset-8">Maintenance</span>
+          {title.split(' ')[0]} <br />
+          <span className="text-emerald-500 underline decoration-emerald-200 underline-offset-8">{title.split(' ').slice(1).join(' ')}</span>
         </h1>
         
         <p className="text-slate-500 font-medium leading-relaxed mb-8">
-          We're currently optimizing the Fresh Box experience. We'll be back shortly with a smoother, faster plateau for your health goals.
+          {message}
         </p>
 
         <div className="space-y-4">

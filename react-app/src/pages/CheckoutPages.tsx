@@ -15,6 +15,7 @@ import { cn } from "../lib/utils";
 import { User, Sparkles, MapPin, Plus, LocateFixed, ArrowRight, Store, Navigation, Map as MapIcon, CheckCircle2, AlertTriangle } from "lucide-react";
 import { MapPicker } from "../components/ui/MapPicker";
 import { OrderStatusOverlay } from "../components/ui/OrderStatusOverlay";
+import { api } from "../lib/api";
 
 function Pill({ children }: { children: React.ReactNode }) {
   return <span className="text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded bg-black/5 text-black/60">{children}</span>;
@@ -1010,7 +1011,7 @@ export function CheckoutPersonalPage({
           setTargetMap({});
 
           // Trigger welcome email in the background (fire and forget)
-          supabase.functions.invoke('welcome-subscription', { body: { subscriptionId: subData.id } }).catch(console.error);
+          api.v1.sendWelcomeEmail(subData.id).catch(console.error);
           
           // Success overlay will handle navigation after delay
         };

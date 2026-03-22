@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from "react";
-import { supabase } from "../lib/supabase";
+import { api } from "../lib/api";
 
 // Extend the Window interface to include Razorpay
 declare global {
@@ -51,21 +51,24 @@ export function useRazorpay() {
       let razorpayOrderId: string | undefined;
 
       try {
-        const { data, error: fnError } = await supabase.functions.invoke("create-razorpay-order", {
-          body: {
-            amount: opts.amount,
-            currency: "INR",
-            receipt: opts.orderNumber,
-            notes: { order_number: opts.orderNumber },
-          },
+        const { data, error: fnError } = await api.v1.createOrder({
+          amount: opts.amount,
+          currency: "INR",
+          receipt: opts.orderNumber,
+          notes: { order_number: opts.orderNumber },
         });
 
-        if (!fnError && data && !data.error) {
-          // Edge Function succeeded — use the server-created order
-          keyId = data.key_id;
-          razorpayOrderId = data.razorpay_order_id;
-        } else {
-          console.warn("Edge Function not available, using direct Razorpay mode:", fnError?.message ?? data?.error);
+        if (!fnError && data) {
+          const resBody = data as any;
+          if (!resBody.error) {
+            // Edge Function succeeded — use the server-created order
+            keyId = resBody.key_id;
+            razorpayOrderId = resBody.razorpay_order_id;
+          } else {
+            console.warn("Edge Function returned an error:", resBody.error);
+          }
+        } else if (fnError) {
+          console.warn("Edge Function call failed:", fnError.message);
         }
       } catch {
         console.warn("Edge Function call failed, falling back to direct Razorpay mode.");

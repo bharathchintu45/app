@@ -16,9 +16,9 @@ const supabase = createClient(supabaseUrl, supabaseKey, {
 
 async function run() {
   console.log('Invoking generate-daily-orders...');
-  const { data, error } = await supabase.functions.invoke('generate-daily-orders', {
-    method: 'POST',
-    body: {}
+  const { data, error } = await supabase.functions.invoke('api', {
+    headers: { 'x-path': '/v1/generate-daily-orders' },
+    body: { targetDate: '2026-03-22' } 
   });
   
   if (error) {
