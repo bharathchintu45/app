@@ -59,12 +59,13 @@ export function useOrderNotifications(
       // First fetch the delivery_boy record to get the ID
       let channel: any;
       (async () => {
-        const { data: dbRow } = await import("../lib/supabase").then(m => 
-          m.supabase.from("delivery_boys").select("id").eq("profile_id", user.id).maybeSingle()
-        );
+        const { data: dbRow } = await supabase
+          .from("delivery_boys")
+          .select("id")
+          .eq("profile_id", user.id)
+          .maybeSingle();
         if (!dbRow?.id) return;
 
-        const { supabase } = await import("../lib/supabase");
         channel = supabase
           .channel(`delivery-notify-${user.id}`)
           .on("postgres_changes", {
@@ -81,7 +82,7 @@ export function useOrderNotifications(
 
       return () => {
         if (channel) {
-          import("../lib/supabase").then(m => m.supabase.removeChannel(channel));
+          supabase.removeChannel(channel);
         }
       };
     }
