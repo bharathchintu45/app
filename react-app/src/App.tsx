@@ -8,6 +8,7 @@ import { dayKey, addDays, parseDateKeyToDate, getTodayIndia } from "./lib/format
 import { useOrderNotifications } from "./hooks/useOrderNotifications";
 import { useAppSetting, useAppSettingString } from "./hooks/useAppSettings";
 import { useUser } from "./contexts/UserContext";
+import { SpeedInsights } from "@vercel/speed-insights/react";
 
 // Layout
 import { TopNav } from "./components/layout/TopNav";
@@ -748,6 +749,7 @@ export default function App() {
       <OfflineOverlay isOffline={isOffline} />
           </div>
       </React.Suspense>
+      <SpeedInsights />
     </ErrorBoundary>
   );
 }
