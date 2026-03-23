@@ -9,8 +9,7 @@ import {
   Pause, 
   Play, 
   Archive, 
-  X, 
-  Trash2 
+  X
 } from "lucide-react";
 import { api } from "../../lib/api";
 import { supabase } from "../../lib/supabase";

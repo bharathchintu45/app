@@ -57,7 +57,7 @@ export interface UpdateSettingsResponse {
 
 // Subscriptions/Orders Endpoint
 export interface ManageSubscriptionsParams {
-  action: 'cancel' | 'pause' | 'resume' | 'manual_add';
+  action: 'cancel' | 'pause' | 'resume' | 'manual_add' | 'add_days' | 'delete';
   subscriptionId?: string;
   data?: any;
 }

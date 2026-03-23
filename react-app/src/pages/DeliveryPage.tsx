@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { motion } from "framer-motion";
 import { supabase } from "../lib/supabase";
 import type { AppUser } from "../types";
-import { MapPin, Navigation, X, AlertTriangle, MessageCircle, CheckCircle, Package, Truck, Phone, Camera, Upload, Image as ImageIcon, ChevronDown } from "lucide-react";
+import { MapPin, Navigation, X, AlertTriangle, MessageCircle, CheckCircle, Package, Truck, Phone, Camera, Upload, ChevronDown } from "lucide-react";
 import { useAppSettingString } from "../hooks/useAppSettings";
 import { Button } from "../components/ui/Button";
 import { cn } from "../lib/utils";
