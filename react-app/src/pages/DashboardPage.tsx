@@ -14,6 +14,8 @@ import { SwapMealModal } from "../components/dashboard/SwapMealModal";
 import { ActiveSubscriptionDashboard } from "../components/dashboard/ActiveSubscriptionDashboard";
 import { supabase } from "../lib/supabase";
 import { SkeletonDashboard } from "../components/ui/Skeleton";
+import { useRazorpay } from "../hooks/useRazorpay";
+import { SwapConfirmationModal } from "../components/dashboard/SwapConfirmationModal";
 
 export function DashboardPage({
   user,
@@ -164,6 +166,9 @@ export function DashboardPage({
 
   const [modalItem, setModalItem] = useState<MenuItem | null>(null);
   const [swapSlot, setSwapSlot] = useState<{ slot: Slot, date: string } | null>(null);
+  const [pendingSwap, setPendingSwap] = useState<MenuItem | null>(null);
+  const { openPayment, loading: payLoading } = useRazorpay();
+  const [dbLoading, setDbLoading] = useState(false);
 
   const [showSubWarning, setShowSubWarning] = useState(false);
   useEffect(() => {
@@ -182,34 +187,67 @@ export function DashboardPage({
   const currentHolds = isExploring ? exploreHolds : holds;
   const currentSetHolds = isExploring ? setExploreHolds : setHolds;
 
-  async function handleSwapComplete(item: MenuItem) {
-    if (!swapSlot || !activeSubscription) return;
+  function handleSwapRequest(item: MenuItem) {
+    setPendingSwap(item);
+  }
+
+  async function handleConfirmSwap() {
+    if (!swapSlot || !activeSubscription || !pendingSwap) return;
     
-    const newSwap = {
-      subscription_id: activeSubscription.id,
-      date: swapSlot.date,
-      slot: swapSlot.slot,
-      menu_item_id: item.id
+    const item = pendingSwap;
+    const currentItem = planMap[swapSlot.date]?.[swapSlot.slot];
+    const priceDiff = (item.priceINR || 0) - (currentItem?.priceINR || 0);
+
+    const performSwap = async (paymentId?: string) => {
+      setDbLoading(true);
+      const newSwap = {
+        subscription_id: activeSubscription.id,
+        date: swapSlot.date,
+        slot: swapSlot.slot,
+        menu_item_id: item.id,
+        meta: paymentId ? { payment_id: paymentId, price_diff: priceDiff } : {}
+      };
+
+      try {
+        const { error } = await supabase
+          .from("subscription_swaps")
+          .upsert(newSwap, { onConflict: 'subscription_id,date,slot' });
+          
+        if (error) {
+          showToast(`Swap failed: ${error.message}`);
+        } else {
+           setPlanMap(prev => {
+             const day = prev[swapSlot.date] || {};
+             return { ...prev, [swapSlot.date]: { ...day, [swapSlot.slot]: item } };
+           });
+           showToast("Meal swapped successfully! ✅");
+           setPendingSwap(null);
+           setSwapSlot(null);
+        }
+      } finally {
+        setDbLoading(false);
+      }
     };
 
-    console.log("[Swap] Upserting with subscription_id:", activeSubscription.id, newSwap);
-
-    const { error } = await supabase
-      .from("subscription_swaps")
-      .upsert(newSwap, { onConflict: 'subscription_id,date,slot' });
+    if (priceDiff > 0) {
+      if (payLoading) return;
       
-    if (error) {
-      console.error("[Swap] Error:", error);
-      showToast(`Swap failed: ${error.message}`);
+      openPayment({
+        amount: priceDiff,
+        orderNumber: `SWAP-${activeSubscription.id.slice(0, 8)}-${Date.now()}`,
+        customerName: user?.name || "Customer",
+        customerEmail: user?.email || "",
+        customerPhone: user?.phone || "",
+        onSuccess: (paymentId) => {
+          performSwap(paymentId);
+        },
+        onFailure: (msg) => {
+          showToast(`Upgrade payment failed: ${msg}`);
+        }
+      });
     } else {
-       setPlanMap(prev => {
-         const day = prev[swapSlot.date] || {};
-         return { ...prev, [swapSlot.date]: { ...day, [swapSlot.slot]: item } };
-       });
-       showToast("Meal swapped successfully! ✅");
+      performSwap();
     }
-    
-    setSwapSlot(null);
   }
 
 
@@ -485,7 +523,19 @@ export function DashboardPage({
         onClose={() => setSwapSlot(null)}
         slot={swapSlot.slot}
         menu={MENU}
-        onSwap={handleSwapComplete}
+        onSwap={handleSwapRequest}
+        currentItem={planMap[swapSlot.date]?.[swapSlot.slot]}
+      />
+    )}
+
+    {pendingSwap && swapSlot && (
+      <SwapConfirmationModal
+        isOpen={true}
+        onClose={() => setPendingSwap(null)}
+        onConfirm={handleConfirmSwap}
+        oldItem={planMap[swapSlot.date]?.[swapSlot.slot]}
+        newItem={pendingSwap}
+        isLoading={payLoading || dbLoading}
       />
     )}
     <AnimatePresence>

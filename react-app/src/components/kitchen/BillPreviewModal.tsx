@@ -31,7 +31,7 @@ export function buildSingleLabelHtml(order: OrderReceipt): string {
   return `
     <div style="page-break-after:always;font-family:'Courier New',monospace;font-size:10px;width:72mm;margin:0 auto;padding:4mm 2mm;color:#000;line-height:1.2">
       <div style="text-align:center;margin-bottom:4px">
-        <div style="font-size:16px;font-weight:900;letter-spacing:-0.5px">THE FIT BOWL</div>
+        <div style="font-size:16px;font-weight:900;letter-spacing:-0.5px">THE FIT BOWLS</div>
         <div style="font-size:7px;font-weight:700;text-transform:uppercase;letter-spacing:3px;border-bottom:1px solid #000;padding-bottom:4px;margin-bottom:4px">Precision Nutrition</div>
       </div>
       <div style="display:flex;justify-content:space-between;align-items:center;background:#000;color:#fff;padding:4px 8px;margin-bottom:4px">
@@ -86,7 +86,7 @@ export function buildSingleLabelHtml(order: OrderReceipt): string {
       <div style="text-align:center;border-top:1px dashed #ccc;padding-top:8px;margin-top:8px">
         <div style="font-size:9px;font-weight:900;letter-spacing:2px;text-transform:uppercase">Eat Clean \u2022 Feel Great</div>
         <div style="font-size:7px;margin-top:2px;font-weight:700">Support: +91 85009 29080</div>
-        <div style="font-size:6px;margin-top:4px;opacity:0.5;text-transform:uppercase;font-weight:700">Precision delivery by THE FIT BOWL</div>
+        <div style="font-size:6px;margin-top:4px;opacity:0.5;text-transform:uppercase;font-weight:700">Precision delivery by THE FIT BOWLS</div>
       </div>
     </div>`;
 }

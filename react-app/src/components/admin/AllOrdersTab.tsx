@@ -1,6 +1,6 @@
-import { useState, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 import { motion } from "framer-motion";
-import { Package, Search, RefreshCw } from "lucide-react";
+import { Package, Search, RefreshCw, Image as ImageIcon } from "lucide-react";
 import { api } from "../../lib/api";
 import { supabase } from "../../lib/supabase";
 import { Button } from "../ui/Button";
@@ -79,8 +79,8 @@ export default function AllOrdersTab({
       // Show everything, do not filter out is_auto_generated
     } else if (showMode === "auto-generated") {
       if (!o.meta?.is_auto_generated) return false;
-    } else {
-      // Default behavior for "regular", "group", or undefined: HIDE auto-generated
+    } else if (showMode !== undefined) {
+      // Strict behavior for "regular", "group"
       if (o.meta?.is_auto_generated) return false;
     }
 
@@ -241,7 +241,7 @@ export default function AllOrdersTab({
                   const delivDate = o.deliveryAtLabel || new Date(o.createdAt).toISOString().slice(0, 10);
                   const addr = [o.customer?.building, o.customer?.street, o.customer?.area].filter(Boolean).join(", ");
                   return (
-                    <table key={o.id} className="w-full">
+                    <React.Fragment key={o.id}>
                       <tr className="bg-white hover:bg-slate-50/70 transition-colors cursor-pointer" onClick={() => setExpandedId(isExpanded ? null : o.id)}>
                         <td className="px-5 py-4">
                           <div className="text-sm font-black text-slate-900">#{(o as any).orderNumber || o.id}</div>
@@ -336,11 +336,36 @@ export default function AllOrdersTab({
                                   )}
                                 </div>
                               </div>
+                              {/* Proof */}
+                              <div>
+                                <div className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Proof of Delivery</div>
+                                {o.meta?.proof_image_url ? (
+                                  <div className="relative group">
+                                    <div className="aspect-video rounded-2xl overflow-hidden border border-slate-200 bg-slate-100 shadow-sm transition-transform group-hover:scale-[1.05] cursor-zoom-in">
+                                      <img 
+                                        src={o.meta.proof_image_url} 
+                                        alt="Proof of Delivery"
+                                        className="w-full h-full object-cover"
+                                        onClick={() => window.open(o.meta.proof_image_url, '_blank')}
+                                      />
+                                    </div>
+                                    <div className="mt-2 text-[10px] font-bold text-emerald-600 flex items-center gap-1">
+                                      <span>✅ Verified</span>
+                                      {o.meta.delivered_at_iso && <span className="text-slate-400 font-medium">· {new Date(o.meta.delivered_at_iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>}
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <div className="h-24 rounded-2xl border-2 border-dashed border-slate-100 flex flex-col items-center justify-center text-slate-300">
+                                    <ImageIcon size={20} className="mb-1" />
+                                    <span className="text-[9px] font-black uppercase tracking-widest">No Proof</span>
+                                  </div>
+                                )}
+                              </div>
                             </div>
                           </td>
                         </tr>
                       )}
-                    </table>
+                    </React.Fragment>
                   );
                 })}
               </tbody>

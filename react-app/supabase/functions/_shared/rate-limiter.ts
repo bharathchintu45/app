@@ -71,7 +71,7 @@ function defaultKeyExtractor(req: Request): string {
   return "anonymous";
 }
 
-const ALLOWED_ORIGIN = Deno.env.get("ALLOWED_ORIGIN") || "https://thefitbowl.vercel.app";
+const ALLOWED_ORIGIN = Deno.env.get("ALLOWED_ORIGIN") || "https://thefitbowls.vercel.app";
 
 /**
  * Check rate limit. Returns a 429 Response if the caller is over the limit,
@@ -101,11 +101,12 @@ export function rateLimit(
 
   entry.count++;
 
+  const origin = req.headers.get('origin') || '*';
   const headers: Record<string, string> = {
     "X-RateLimit-Limit": String(maxRequests),
     "X-RateLimit-Remaining": String(Math.max(0, maxRequests - entry.count)),
     "X-RateLimit-Reset": String(Math.ceil(entry.resetAt / 1000)),
-    "Access-Control-Allow-Origin": ALLOWED_ORIGIN,
+    "Access-Control-Allow-Origin": origin === 'null' ? '*' : origin,
     "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
     "Content-Type": "application/json",
   };

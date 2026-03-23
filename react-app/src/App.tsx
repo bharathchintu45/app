@@ -4,7 +4,7 @@ import type { Route, AuthIntent, DashboardTab, GroupCart, GroupOrderDraft, Holds
 import { subscriptionId, runDevTests } from "./data/menu";
 import { getMenu } from "./hooks/useMenu";
 import { supabase } from "./lib/supabase";
-import { dayKey, addDays, parseDateKeyToDate } from "./lib/format";
+import { dayKey, addDays, parseDateKeyToDate, getTodayIndia } from "./lib/format";
 import { useOrderNotifications } from "./hooks/useOrderNotifications";
 import { useAppSetting, useAppSettingString } from "./hooks/useAppSettings";
 import { useUser } from "./contexts/UserContext";
@@ -232,9 +232,7 @@ export default function App() {
         isFetchingRef.current = true;
         setIsSubLoading(true);
 
-        const todayDt = new Date();
-        todayDt.setHours(todayDt.getHours() + 5, todayDt.getMinutes() + 30);
-        const todayStr = todayDt.toISOString().slice(0, 10);
+        const todayStr = getTodayIndia();
 
         const [threadsRes, subRes, menuItems, ordersRes] = await Promise.all([
           supabase.from("chef_threads").select("*").eq("customer_id", user!.id).order("created_at", { ascending: true }),
@@ -341,32 +339,32 @@ export default function App() {
     return () => { supabase.removeChannel(channel); };
   }, [user]);
 
-  // Sync basic state to local storage
-  useEffect(() => { localStorage.setItem("tfb_subscription", subscription); }, [subscription]);
-  useEffect(() => { localStorage.setItem("tfb_regular_cart", JSON.stringify(regularCart)); }, [regularCart]);
-  useEffect(() => { localStorage.setItem("tfb_holds", JSON.stringify(holds)); }, [holds]);
-  useEffect(() => { localStorage.setItem("tfb_plan_map", JSON.stringify(planMap)); }, [planMap]);
-
+  // ✅ Optimized Centralized Storage Sync
   useEffect(() => {
-    localStorage.setItem("tfb_group_cart", JSON.stringify(groupCart));
-  }, [groupCart]);
+    const syncMap = {
+      tfb_subscription: subscription,
+      tfb_regular_cart: JSON.stringify(regularCart),
+      tfb_holds: JSON.stringify(holds),
+      tfb_plan_map: JSON.stringify(planMap),
+      tfb_group_cart: JSON.stringify(groupCart),
+      tfb_group_draft: JSON.stringify(groupDraft),
+      tfb_start_dates: JSON.stringify(startDates),
+      tfb_target_map: JSON.stringify(targetMap),
+    };
 
-  useEffect(() => {
-    localStorage.setItem("tfb_group_draft", JSON.stringify(groupDraft));
-  }, [groupDraft]);
+    Object.entries(syncMap).forEach(([key, value]) => {
+      localStorage.setItem(key, value);
+    });
 
-  useEffect(() => {
-    localStorage.setItem("tfb_start_dates", JSON.stringify(startDates));
-  }, [startDates]);
-
-  useEffect(() => {
-    localStorage.setItem("tfb_target_map", JSON.stringify(targetMap));
-  }, [targetMap]);
-
-  useEffect(() => {
-    if (activeSubscription) localStorage.setItem("tfb_active_subscription", JSON.stringify(activeSubscription));
-    else localStorage.removeItem("tfb_active_subscription");
-  }, [activeSubscription]);
+    if (activeSubscription) {
+      localStorage.setItem("tfb_active_subscription", JSON.stringify(activeSubscription));
+    } else {
+      localStorage.removeItem("tfb_active_subscription");
+    }
+  }, [
+    subscription, regularCart, holds, planMap, 
+    groupCart, groupDraft, startDates, targetMap, activeSubscription
+  ]);
 
   const showToast = useCallback((msg: string) => {
     setToastMsg(msg);

@@ -10,9 +10,10 @@ interface SwapMealModalProps {
   slot: Slot;
   menu: MenuItem[];
   onSwap: (item: MenuItem) => void;
+  currentItem?: MenuItem | null;
 }
 
-export function SwapMealModal({ isOpen, onClose, slot, menu, onSwap }: SwapMealModalProps) {
+export function SwapMealModal({ isOpen, onClose, slot, menu, onSwap, currentItem }: SwapMealModalProps) {
   const [search, setSearch] = useState("");
   const [tab, setTab] = useState<Cat>("All-Day Kitchen");
 
@@ -72,21 +73,37 @@ export function SwapMealModal({ isOpen, onClose, slot, menu, onSwap }: SwapMealM
             </div>
 
             <div className="grid sm:grid-cols-2 gap-4">
-              {filtered.map(item => (
-                <div key={item.id} className="flex gap-4 p-3 rounded-xl border border-slate-100 hover:border-emerald-200 hover:bg-emerald-50/30 transition-colors cursor-pointer" onClick={() => onSwap(item)}>
-                  <div className="w-20 h-20 rounded-lg bg-slate-200 shrink-0 overflow-hidden">
-                    <img src={item.image || 'https://images.unsplash.com/photo-1490645935967-10de6ba17061?w=600&q=80'} alt={item.name} className="w-full h-full object-cover" />
-                  </div>
-                  <div className="flex-1 min-w-0 flex flex-col justify-center">
-                    <div className="font-bold text-slate-900 truncate mb-1">{item.name}</div>
-                    <div className="flex items-center gap-2 mb-2">
-                       <span className="text-[10px] bg-white border border-slate-200 px-1.5 py-0.5 rounded font-bold text-slate-500 whitespace-nowrap">{item.calories} kcal</span>
-                       <span className="text-[10px] bg-white border border-slate-200 px-1.5 py-0.5 rounded font-bold text-slate-500 whitespace-nowrap">P {item.protein}g</span>
+              {filtered.map(item => {
+                const priceDiff = (item.priceINR || 0) - (currentItem?.priceINR || 0);
+                const isPremium = priceDiff > 0;
+
+                return (
+                  <div 
+                    key={item.id} 
+                    className="flex gap-4 p-3 rounded-xl border border-slate-100 hover:border-emerald-200 hover:bg-emerald-50/30 transition-colors cursor-pointer group" 
+                    onClick={() => onSwap(item)}
+                  >
+                    <div className="w-20 h-20 rounded-lg bg-slate-200 shrink-0 overflow-hidden">
+                      <img src={item.image || 'https://images.unsplash.com/photo-1490645935967-10de6ba17061?w=600&q=80'} alt={item.name} className="w-full h-full object-cover" />
                     </div>
-                    <button className="text-[11px] font-black uppercase tracking-wider text-emerald-600 bg-emerald-50 self-start px-3 py-1 rounded-lg">Select</button>
+                    <div className="flex-1 min-w-0 flex flex-col justify-center">
+                      <div className="font-bold text-slate-900 truncate mb-1">{item.name}</div>
+                      <div className="flex items-center gap-2 mb-2">
+                         <span className="text-[10px] bg-white border border-slate-200 px-1.5 py-0.5 rounded font-bold text-slate-500 whitespace-nowrap">{item.calories} kcal</span>
+                         <span className="text-[10px] bg-white border border-slate-200 px-1.5 py-0.5 rounded font-bold text-slate-500 whitespace-nowrap">P {item.protein}g</span>
+                         <span className="text-[10px] bg-white border border-slate-200 px-1.5 py-0.5 rounded font-bold text-slate-500 whitespace-nowrap">₹{item.priceINR || 0}</span>
+                      </div>
+                      <button className={`text-[11px] font-black uppercase tracking-wider self-start px-3 py-1 rounded-lg transition-all ${
+                        isPremium 
+                          ? "text-orange-600 bg-orange-50 group-hover:bg-orange-100" 
+                          : "text-emerald-600 bg-emerald-50 group-hover:bg-emerald-100"
+                      }`}>
+                        {isPremium ? `Upgrade (+₹${priceDiff})` : "Swap"}
+                      </button>
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
               {filtered.length === 0 && (
                 <div className="col-span-2 text-center py-12 text-slate-500">
                   No items found matching your search.

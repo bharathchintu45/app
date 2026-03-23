@@ -11,11 +11,12 @@ import {
   Check, 
   ShieldCheck,
   Package,
-  FileText
+  FileText,
+  Zap
 } from "lucide-react";
 import { 
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  PieChart, Pie, Cell
+  PieChart, Pie, Cell, BarChart, Bar
 } from "recharts";
 import { supabase } from "../../lib/supabase";
 import { Button } from "../ui/Button";
@@ -122,18 +123,36 @@ export default function AnalyticsTab({ showToast }: AnalyticsTabProps) {
 
     const { data } = await supabase
       .from('orders')
-      .select('id, order_number, total, kind, payment_status, status, created_at, customer_name, delivery_date, delivery_details, order_items(item_name, quantity, unit_price)')
+      .select('id, order_number, total, kind, payment_status, status, created_at, customer_name, delivery_date, delivery_details, meta, order_items(item_name, quantity, unit_price)')
       .neq('status', 'cancelled')
       .gte('created_at', fetchStartStr)
       .lte('created_at', analyticsRange === 'custom' ? customRange.end + 'T23:59:59Z' : today.toISOString())
       .order('created_at', { ascending: false });
 
+    const { data: swapData } = await supabase
+      .from('subscription_swaps')
+      .select('created_at, meta')
+      .gte('created_at', fetchStartStr)
+      .lte('created_at', analyticsRange === 'custom' ? customRange.end + 'T23:59:59Z' : today.toISOString());
+
     if (data) {
       const currentOrders = data.filter(o => o.created_at >= currentPeriodStartStr && o.created_at <= (analyticsRange === 'custom' ? customRange.end + 'T23:59:59Z' : today.toISOString()));
       const previousOrdersList = data.filter(o => o.created_at >= previousPeriodStart.toISOString() && o.created_at < currentPeriodStartStr);
+      
+      const currentSwaps = (swapData || []).filter(s => s.created_at >= currentPeriodStartStr && s.created_at <= (analyticsRange === 'custom' ? customRange.end + 'T23:59:59Z' : today.toISOString()));
+      const previousSwaps = (swapData || []).filter(s => s.created_at >= previousPeriodStart.toISOString() && s.created_at < currentPeriodStartStr);
 
-      const totalRev = currentOrders.reduce((sum, o) => sum + (o.total || 0), 0);
-      const previousRev = previousOrdersList.reduce((sum, o) => sum + (o.total || 0), 0);
+      const calculateOrderSum = (o: any) => o.total || (o.order_items?.reduce((s: number, i: any) => s + (i.unit_price * i.quantity), 0) || 0);
+      const calculateSwapRev = (list: any[]) => list.reduce((sum, s) => sum + (s.meta?.price_diff || 0), 0);
+
+      const orderRev = currentOrders.reduce((sum, o) => sum + calculateOrderSum(o), 0);
+      const swapRev = calculateSwapRev(currentSwaps);
+      const totalRev = orderRev + swapRev;
+
+      const prevOrderRev = previousOrdersList.reduce((sum, o) => sum + calculateOrderSum(o), 0);
+      const prevSwapRev = calculateSwapRev(previousSwaps);
+      const previousRev = prevOrderRev + prevSwapRev;
+
       const activeSubs = currentOrders.filter(o => o.kind === 'personalized' && o.status !== 'delivered').length;
       const totalOrders = currentOrders.length;
       const previousOrdersCount = previousOrdersList.length;
@@ -159,7 +178,8 @@ export default function AnalyticsTab({ showToast }: AnalyticsTabProps) {
       
       setRealStats({ 
         totalRev, previousRev, activeSubs, totalOrders, previousOrders: previousOrdersCount,
-        todayOrders, yesterdayOrders, thisWeekOrders, lastWeekOrders, filteredOrders: currentOrders 
+        todayOrders, yesterdayOrders, thisWeekOrders, lastWeekOrders, filteredOrders: currentOrders,
+        swapRev // Keep track of swap revenue specifically
       });
     }
     setStatsLoading(false);
@@ -176,19 +196,42 @@ export default function AnalyticsTab({ showToast }: AnalyticsTabProps) {
     const itemCounts: Record<string, { qty: number; revenue: number; uniqueCustomers: Set<string> }> = {};
     const dailyVelocity: Record<string, { date: string; regular: number; subscription: number; group: number }> = {};
     const cityCounts: Record<string, number> = {};
-    const customerStats: Record<string, { orders: number; revenue: number }> = {};
+    const customerStats: Record<string, { orders: number; revenue: number; firstOrder: string }> = {};
     const subPlanDistribution: Record<string, number> = {};
     const monthlyRevMap: Record<string, number> = { 'Jan':0,'Feb':0,'Mar':0,'Apr':0,'May':0,'Jun':0,'Jul':0,'Aug':0,'Sep':0,'Oct':0,'Nov':0,'Dec':0 };
+    const hourlyDistribution: Record<number, number> = {};
+    // Initialize hourly map (0-23)
+    for (let i=0; i<24; i++) hourlyDistribution[i] = 0;
+
+    let deliveryTimeSum = 0;
+    let deliveryTimeCount = 0;
 
     filteredOrders.forEach((o: any) => {
-      const kind = o.kind || 'regular';
+      const orderTotal = o.total || (o.order_items?.reduce((s: number, i: any) => s + (i.unit_price * i.quantity), 0) || 0);
+      
+      // Hourly distribution
+      const orderHour = new Date(o.created_at).getHours();
+      hourlyDistribution[orderHour] = (hourlyDistribution[orderHour] || 0) + 1;
+
+      // Delivery precision
+      if (o.meta?.delivered_at_iso) {
+        const start = new Date(o.created_at).getTime();
+        const end = new Date(o.meta.delivered_at_iso).getTime();
+        const diffMin = (end - start) / (1000 * 60);
+        if (diffMin > 0 && diffMin < 1440) { // Limit to 24h to avoid extreme outliers
+          deliveryTimeSum += diffMin;
+          deliveryTimeCount++;
+        }
+      }
+
       const city = o.delivery_details?.city || 'Unknown';
-      cityCounts[city] = (cityCounts[city] || 0) + (o.total || 0);
+      cityCounts[city] = (cityCounts[city] || 0) + orderTotal;
 
       const cName = o.customer_name || 'Guest';
-      if (!customerStats[cName]) customerStats[cName] = { orders: 0, revenue: 0 };
+      if (!customerStats[cName]) customerStats[cName] = { orders: 0, revenue: 0, firstOrder: o.created_at };
       customerStats[cName].orders++;
-      customerStats[cName].revenue += (o.total || 0);
+      customerStats[cName].revenue += orderTotal;
+      if (o.created_at < customerStats[cName].firstOrder) customerStats[cName].firstOrder = o.created_at;
 
       (o.order_items || []).forEach((item: any) => {
         const name = item.item_name || 'Unknown Item';
@@ -200,18 +243,34 @@ export default function AnalyticsTab({ showToast }: AnalyticsTabProps) {
 
       const dStr = new Date(o.created_at).toISOString().slice(5, 10);
       if (!dailyVelocity[dStr]) dailyVelocity[dStr] = { date: dStr, regular: 0, subscription: 0, group: 0 };
-      if (o.kind === 'regular') dailyVelocity[dStr].regular += (o.total || 0);
-      else if (o.kind === 'personalized') dailyVelocity[dStr].subscription += (o.total || 0);
-      else if (o.kind === 'group') dailyVelocity[dStr].group += (o.total || 0);
+      if (o.kind === 'regular') dailyVelocity[dStr].regular += orderTotal;
+      else if (o.kind === 'personalized') dailyVelocity[dStr].subscription += orderTotal;
+      else if (o.kind === 'group') dailyVelocity[dStr].group += orderTotal;
 
       const d = new Date(o.created_at);
       const mStr = d.toLocaleString('en-US', { month: 'short' });
-      if (monthlyRevMap[mStr] !== undefined) monthlyRevMap[mStr] += (o.total || 0);
+      if (monthlyRevMap[mStr] !== undefined) monthlyRevMap[mStr] += orderTotal;
     });
+
+    const avgDeliveryTime = deliveryTimeCount > 0 ? Math.round(deliveryTimeSum / deliveryTimeCount) : 0;
+    
+    const totalCustomers = Object.keys(customerStats).length;
+    const repeatCustomers = Object.values(customerStats).filter(c => c.orders > 1).length;
+    const retentionRate = totalCustomers > 0 ? Math.round((repeatCustomers / totalCustomers) * 100) : 0;
 
     return { 
       totalRev, previousRev, avgOrderValue, revenueGrowth, orderGrowth, taxCollected,
       activeSubs: realStats.activeSubs, totalOrders,
+      avgDeliveryTime, 
+      retentionRate,
+      retentionData: [
+        { name: 'Repeat', value: repeatCustomers },
+        { name: 'New', value: totalCustomers - repeatCustomers }
+      ],
+      hourlyData: Object.entries(hourlyDistribution).map(([hour, count]) => ({ 
+        hour: `${hour}:00`, 
+        orders: count 
+      })),
       topCats: Object.entries(catCounts).sort((a,b) => b[1] - a[1]),
       topItems: Object.entries(itemCounts).map(([name, data]) => ({ name, ...data, uniqueCustCount: data.uniqueCustomers.size })).sort((a,b) => b.revenue - a.revenue).slice(0, 10),
       topCustomers: Object.entries(customerStats).map(([name, data]) => ({ name, ...data })).sort((a,b) => b.revenue - a.revenue).slice(0, 10),
@@ -242,7 +301,7 @@ export default function AnalyticsTab({ showToast }: AnalyticsTabProps) {
 
   function downloadFinanceReport() {
     if (realStats.filteredOrders.length === 0) { showToast("No data available."); return; }
-    const { totalRev, taxCollected, totalOrders } = stats;
+    const { totalRev, taxCollected } = stats;
     const netRev = totalRev - taxCollected;
     let csvContent = `TFB FINANCIAL REPORT\nGenerated On,${new Date().toLocaleDateString("en-IN")}\nGross Revenue,${totalRev}\nTax collected,${taxCollected}\nNet Revenue,${netRev}\n\n`;
     csvContent += "Date,Order ID,Customer,Amount,Type\n";
@@ -280,12 +339,24 @@ export default function AnalyticsTab({ showToast }: AnalyticsTabProps) {
       </div>
 
       {/* Stats Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-6">
         <Card className="rounded-[2.5rem] shadow-sm border-slate-100">
           <CardContent className="p-8">
             <div className="flex items-center justify-between mb-4"><BarChart3 size={24} className="text-indigo-500" /><span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Total Revenue</span></div>
             {statsLoading ? <Skeleton className="h-10 w-24" /> : (
-              <div><div className="text-3xl font-black text-slate-900">₹{stats.totalRev.toLocaleString('en-IN')}</div><div className={`mt-2 text-xs font-bold flex items-center gap-1 ${stats.revenueGrowth >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>{stats.revenueGrowth >= 0 ? <TrendingUp size={14}/> : <TrendingDown size={14}/>} {Math.abs(Math.round(stats.revenueGrowth))}% vs prev</div></div>
+              <div>
+                <div className="text-3xl font-black text-slate-900">₹{stats.totalRev.toLocaleString('en-IN')}</div>
+                <div className="flex items-center gap-2 mt-2">
+                  <div className={`text-xs font-bold flex items-center gap-1 ${stats.revenueGrowth >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
+                    {stats.revenueGrowth >= 0 ? <TrendingUp size={14}/> : <TrendingDown size={14}/>} {Math.abs(Math.round(stats.revenueGrowth))}%
+                  </div>
+                  {realStats.swapRev > 0 && (
+                    <div className="text-[9px] font-black text-orange-600 bg-orange-50 px-2 py-0.5 rounded-full border border-orange-100 flex items-center gap-1">
+                      <Zap size={10} fill="currentColor" /> ₹{realStats.swapRev} Upgrades
+                    </div>
+                  )}
+                </div>
+              </div>
             )}
           </CardContent>
         </Card>
@@ -299,7 +370,23 @@ export default function AnalyticsTab({ showToast }: AnalyticsTabProps) {
         </Card>
         <Card className="rounded-[2.5rem] shadow-sm border-slate-100">
           <CardContent className="p-8">
-            <div className="flex items-center justify-between mb-4"><Users size={24} className="text-amber-500" /><span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Avg. Order</span></div>
+            <div className="flex items-center justify-between mb-4"><Users size={24} className="text-amber-500" /><span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Retention</span></div>
+            {statsLoading ? <Skeleton className="h-10 w-24" /> : (
+              <div><div className="text-3xl font-black text-slate-900">{stats.retentionRate}%</div><div className="mt-2 text-xs font-bold text-slate-400">Repeat customers</div></div>
+            )}
+          </CardContent>
+        </Card>
+        <Card className="rounded-[2.5rem] shadow-sm border-slate-100">
+          <CardContent className="p-8">
+            <div className="flex items-center justify-between mb-4"><Clock size={24} className="text-blue-500" /><span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Avg Delivery</span></div>
+            {statsLoading ? <Skeleton className="h-10 w-24" /> : (
+              <div><div className="text-3xl font-black text-slate-900">{stats.avgDeliveryTime}m</div><div className="mt-2 text-xs font-bold text-slate-400 flex items-center gap-1.5">Order to handover</div></div>
+            )}
+          </CardContent>
+        </Card>
+        <Card className="rounded-[2.5rem] shadow-sm border-slate-100">
+          <CardContent className="p-8">
+            <div className="flex items-center justify-between mb-4"><FileText size={24} className="text-slate-400" /><span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Avg Order</span></div>
             {statsLoading ? <Skeleton className="h-10 w-24" /> : (
               <div><div className="text-3xl font-black text-slate-900">₹{stats.avgOrderValue}</div><div className="mt-2 text-xs font-bold text-slate-400">Per transaction</div></div>
             )}
@@ -307,9 +394,9 @@ export default function AnalyticsTab({ showToast }: AnalyticsTabProps) {
         </Card>
         <Card className="rounded-[2.5rem] shadow-sm border-slate-100">
           <CardContent className="p-8">
-            <div className="flex items-center justify-between mb-4"><ShieldCheck size={24} className="text-slate-400" /><span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Tax Summary</span></div>
+            <div className="flex items-center justify-between mb-4"><ShieldCheck size={24} className="text-slate-300" /><span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Tax Est.</span></div>
             {statsLoading ? <Skeleton className="h-10 w-24" /> : (
-              <div><div className="text-3xl font-black text-slate-600">₹{stats.taxCollected.toLocaleString('en-IN')}</div><div className="mt-2 text-xs font-bold text-slate-400 flex items-center gap-1.5"><Check size={14} className="text-emerald-400" /> 5% GST Est.</div></div>
+              <div><div className="text-3xl font-black text-slate-600">₹{stats.taxCollected.toLocaleString('en-IN')}</div><div className="mt-2 text-xs font-bold text-slate-400 flex items-center gap-1.5"><Check size={14} className="text-emerald-400" /> 5% GST incl.</div></div>
             )}
           </CardContent>
         </Card>
@@ -333,6 +420,65 @@ export default function AnalyticsTab({ showToast }: AnalyticsTabProps) {
             <CardContent className="p-8"><div className="space-y-4">{stats.topCustomers.slice(0, 5).map((cust, i) => (<div key={i} className="flex items-center justify-between"><div className="flex items-center gap-3"><div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-600 font-bold text-[10px]">{i+1}</div><div className="flex flex-col"><span className="text-xs font-bold text-slate-900 truncate max-w-[120px]">{cust.name}</span><span className="text-[10px] text-slate-400 font-medium">{cust.orders} orders</span></div></div><span className="text-xs font-black text-indigo-600">₹{cust.revenue.toLocaleString()}</span></div>))}</div></CardContent>
           </Card>
         </div>
+      </div>
+
+      {/* Secondary Insights Row */}
+      <div className="grid gap-6 lg:grid-cols-3 mb-6">
+        <Card className="lg:col-span-2 rounded-[2.5rem] shadow-sm border-slate-100">
+          <CardHeader className="p-8 pb-0"><SectionTitle icon={Clock} title="Peak Ordering Hours" subtitle="Concentration of orders by hour of day." /></CardHeader>
+          <CardContent className="p-8">
+            <div className="h-[250px] w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={stats.hourlyData}>
+                  <defs>
+                    <linearGradient id="barGrad" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#6366f1" stopOpacity={1}/>
+                      <stop offset="95%" stopColor="#818cf8" stopOpacity={0.8}/>
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                  <XAxis dataKey="hour" axisLine={false} tickLine={false} tick={{ fontSize: 9, fontWeight: 700, fill: '#94a3b8' }} />
+                  <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 9, fontWeight: 700, fill: '#94a3b8' }} />
+                  <Tooltip cursor={{ fill: '#f8fafc' }} />
+                  <Bar dataKey="orders" fill="url(#barGrad)" radius={[10, 10, 0, 0]} barSize={20} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="rounded-[2.5rem] shadow-sm border-slate-100">
+          <CardHeader className="p-8 pb-0"><SectionTitle icon={Users} title="Customer Retention" subtitle="Breakdown of Loyal vs New fans." /></CardHeader>
+          <CardContent className="p-8 flex flex-col items-center justify-center">
+             <div className="h-[180px] w-full relative">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie 
+                      data={stats.retentionData} 
+                      cx="50%" cy="50%" 
+                      innerRadius={50} outerRadius={70} 
+                      paddingAngle={5} dataKey="value" stroke="none"
+                    >
+                      {stats.retentionData.map((_, i) => (<Cell key={i} fill={['#10b981', '#f1f5f9'][i % 2]} />))}
+                    </Pie>
+                    <Tooltip />
+                  </PieChart>
+                </ResponsiveContainer>
+                <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-center">
+                   <div className="text-xl font-black text-slate-900">{stats.retentionRate}%</div>
+                   <div className="text-[8px] font-black uppercase text-slate-400 tracking-wider">Rate</div>
+                </div>
+             </div>
+             <div className="mt-6 flex justify-center gap-6 w-full">
+                {stats.retentionData.map((item, i) => (
+                  <div key={i} className="flex flex-col items-center">
+                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">{item.name}</span>
+                    <span className="text-xl font-black text-slate-900">{item.value}</span>
+                  </div>
+                ))}
+             </div>
+          </CardContent>
+        </Card>
       </div>
 
       <Card className="rounded-[2.5rem] shadow-sm border-slate-100">

@@ -8,12 +8,12 @@ import { SmtpClient } from "https://deno.land/x/smtp@v0.7.0/mod.ts";
  * Logic is self-contained to allow manual deployment via the Supabase Dashboard.
  */
 
-const ALLOWED_ORIGIN = Deno.env.get('ALLOWED_ORIGIN') || 'https://thefitbowl.vercel.app';
+const ALLOWED_ORIGIN = Deno.env.get('ALLOWED_ORIGIN') || 'https://thefitbowls.vercel.app';
 
 function corsHeaders(req: Request) {
-  const origin = req.headers.get('origin');
+  const origin = req.headers.get('origin') || '*';
   return {
-    'Access-Control-Allow-Origin': (origin === ALLOWED_ORIGIN) ? ALLOWED_ORIGIN : ALLOWED_ORIGIN,
+    'Access-Control-Allow-Origin': origin === 'null' ? '*' : origin,
     'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-api-version, x-path',
     'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
   };
@@ -192,6 +192,9 @@ async function handleGenerateDailyOrders(req: Request, headers: any) {
     .gte('end_date', targetDate);
 
   if (subErr) throw subErr;
+  
+  console.log(`[GEN_ORDERS] Target: ${targetDate}. Found ${subs?.length || 0} active subs.`);
+
   if (!subs || subs.length === 0) {
     return new Response(JSON.stringify({ success: true, message: 'No active subscriptions', created: 0 }), { status: 200, headers: { ...headers, 'Content-Type': 'application/json' } });
   }
@@ -201,6 +204,7 @@ async function handleGenerateDailyOrders(req: Request, headers: any) {
   const targetDayName = dayNames[new Date(targetDate + 'T12:00:00Z').getDay()];
 
   for (const sub of subs) {
+    console.log(`[GEN_ORDERS] Processing ${sub.customer_name} (${sub.id}) | starts: ${sub.start_date}`);
     // Check if order already exists for this sub and date
     const { data: existing } = await admin
       .from('orders')
@@ -209,12 +213,103 @@ async function handleGenerateDailyOrders(req: Request, headers: any) {
       .filter('meta->>subscription_id', 'eq', sub.id)
       .filter('meta->>is_auto_generated', 'eq', 'true');
 
-    if (existing && existing.length > 0) continue;
+    if (existing && existing.length > 0) {
+      console.log(`[GEN_ORDERS] -> Skipped: Order already exists`);
+      continue;
+    }
+
+    // Fetch holds for target date
+    const { data: hold } = await admin.from('subscription_holds')
+      .select('*')
+      .eq('subscription_id', sub.id)
+      .eq('hold_date', targetDate)
+      .maybeSingle();
+
+    if (hold?.is_full_day) {
+      console.log(`[GEN_ORDERS] -> Skipped: Full day hold`);
+      continue;
+    }
 
     // Filter schedule for target date/day
     const schedule = (sub.schedule || []) as any[];
-    const dayLines = schedule.filter(l => (l.day === targetDate || l.day === targetDayName) && l.qty > 0);
-    if (dayLines.length === 0) continue;
+    const baseDateStr = sub.start_date ? sub.start_date.split('T')[0] : null;
+
+    let dayLines = schedule.filter(l => {
+      if (l.qty <= 0) return false;
+      if (l.day === targetDate || l.day === targetDayName) return true;
+      if (typeof l.day === 'number' && baseDateStr) {
+        const d = new Date(baseDateStr + 'T12:00:00Z');
+        d.setDate(d.getDate() + (l.day - 1));
+        const derivedDateStr = d.toISOString().slice(0, 10);
+        return derivedDateStr === targetDate;
+      }
+      return false;
+    });
+
+    // Fetch swaps for target date
+    const { data: swaps } = await admin.from('subscription_swaps')
+      .select('*')
+      .eq('subscription_id', sub.id)
+      .eq('date', targetDate);
+
+    // Merge Swaps into dayLines (Swaps override OR add new slots)
+    if (swaps && swaps.length > 0) {
+      dayLines = JSON.parse(JSON.stringify(dayLines)); // Copy to mutate
+      for (const swap of swaps) {
+        const slot = swap.slot || 'Meal';
+        let existingLine = dayLines.find(l => (l.slot || 'Meal') === slot);
+        
+        // Fetch new menu item details
+        const { data: menuItem } = await admin.from('menu_items')
+          .select('name, price_inr')
+          .eq('id', swap.menu_item_id)
+          .maybeSingle();
+
+        if (existingLine) {
+          existingLine.itemId = swap.menu_item_id;
+          if (menuItem) {
+            existingLine.label = menuItem.name;
+            existingLine.unitPriceAtOrder = menuItem.price_inr || 0;
+          }
+        } else {
+          // Add as a new line if it didn't exist in schedule
+          dayLines.push({
+            itemId: swap.menu_item_id,
+            slot: slot,
+            qty: 1, // Default swap qty
+            label: menuItem?.name || "Swapped Item",
+            unitPriceAtOrder: menuItem?.price_inr || 0
+          });
+        }
+      }
+    }
+
+    if (dayLines.length === 0) {
+      console.log(`[GEN_ORDERS] -> Skipped: No schedule or swaps found for targetDate ${targetDate}.`);
+      continue;
+    }
+
+    // Apply partial holds
+    if (hold?.slots) {
+      dayLines = dayLines.filter(l => !hold.slots[l.slot || 'Meal']);
+    }
+
+    if (dayLines.length === 0) {
+      console.log(`[GEN_ORDERS] -> Skipped: All matched slots were held.`);
+      continue;
+    }
+
+    // 4. Ensure all dayLines have prices
+    const missingPriceIds = [...new Set(dayLines.filter(l => l.itemId && l.unitPriceAtOrder === undefined).map(l => l.itemId))];
+    if (missingPriceIds.length > 0) {
+      const { data: menuItems } = await admin.from('menu_items').select('id, price_inr').in('id', missingPriceIds);
+      if (menuItems) {
+        dayLines.forEach(l => {
+          const match = menuItems.find(mi => mi.id === l.itemId);
+          if (match) l.unitPriceAtOrder = match.price_inr || 0;
+        });
+      }
+    }
 
     // Group by slot
     const slots = [...new Set(dayLines.map(l => l.slot || 'Meal'))];
@@ -222,6 +317,10 @@ async function handleGenerateDailyOrders(req: Request, headers: any) {
       const slotItems = dayLines.filter(l => (l.slot || 'Meal') === slot);
       const orderNumber = `${sub.meta?.orderNumber || sub.id.slice(-6).toUpperCase()}-${slot}`;
       
+      const subtotal = slotItems.reduce((s, i) => s + ((i.unitPriceAtOrder || 0) * (i.qty || 1)), 0);
+      const gstAmount = Math.round(subtotal * 0.05);
+      const total = subtotal + gstAmount;
+
       const { data: order, error: orderErr } = await admin.from('orders').insert({
         user_id: sub.user_id,
         order_number: orderNumber,
@@ -231,6 +330,9 @@ async function handleGenerateDailyOrders(req: Request, headers: any) {
         status: 'pending',
         kind: 'personalized',
         delivery_date: targetDate,
+        subtotal: subtotal,
+        gst_amount: gstAmount,
+        total: total,
         meta: {
           subscription_id: sub.id,
           is_auto_generated: true,
@@ -239,7 +341,10 @@ async function handleGenerateDailyOrders(req: Request, headers: any) {
         }
       }).select('id').single();
 
-      if (orderErr) continue;
+      if (orderErr) {
+        console.error(`[GEN_ORDERS] Error creating order ${orderNumber}:`, orderErr);
+        continue;
+      }
 
       const items = slotItems.map(l => ({
         order_id: order.id,
@@ -454,6 +559,61 @@ async function handleDispatchAction(req: Request, headers: any) {
   throw new Error('Unknown dispatch action');
 }
 
+async function handleCleanupProofs(req: Request, headers: any) {
+  const admin = supabaseAdmin();
+  const sevenDaysAgo = new Date();
+  sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+  
+  // 1. List files in proofs/ folder
+  const { data: files, error: listErr } = await admin.storage.from('delivery-proofs').list('proofs', {
+    limit: 100,
+    sortBy: { column: 'created_at', order: 'asc' },
+  });
+
+  if (listErr) throw listErr;
+  if (!files || files.length === 0) {
+    return new Response(JSON.stringify({ success: true, message: 'No proofs found to clean.' }), { status: 200, headers: { ...headers, 'Content-Type': 'application/json' } });
+  }
+
+  const toDelete = files
+    .filter((f: any) => f.created_at && new Date(f.created_at) < sevenDaysAgo)
+    .map((f: any) => `proofs/${f.name}`);
+
+  if (toDelete.length > 0) {
+    // 2. Delete from Storage
+    const { error: delErr } = await admin.storage.from('delivery-proofs').remove(toDelete);
+    if (delErr) console.error("Storage delete error:", delErr);
+
+    // 3. Clear meta in DB (extracted from filenames: orderId_timestamp.jpg)
+    for (const fullPath of toDelete) {
+      try {
+        const fileName = fullPath.split('/')[1];
+        const orderId = fileName.split('_')[0];
+        
+        const { data: order } = await admin.from('orders').select('meta').eq('id', orderId).single();
+        if (order?.meta?.proof_image_url) {
+           const newMeta = { ...order.meta, proof_image_url: null, proof_archived: true };
+           await admin.from('orders').update({ meta: newMeta }).eq('id', orderId);
+        }
+      } catch (e) {
+        console.error("Meta update failed for", fullPath, e);
+      }
+    }
+  }
+
+  return new Response(JSON.stringify({ 
+    success: true, 
+    deletedCount: toDelete.length,
+    message: `Cleanup complete. ${toDelete.length} older proofs removed.` 
+  }), { status: 200, headers: { ...headers, 'Content-Type': 'application/json' } });
+}
+
+async function handleDebugOrders(req: Request, headers: any) {
+  const admin = supabaseAdmin();
+  const { data: orders } = await admin.from('orders').select('*').limit(5).order('created_at', { ascending: false });
+  return new Response(JSON.stringify({ success: true, recentOrders: orders }), { status: 200, headers: { ...headers, 'Content-Type': 'application/json' } });
+}
+
 // --- MAIN ROUTER ---
 
 serve(async (req: Request) => {
@@ -478,14 +638,17 @@ serve(async (req: Request) => {
       case '/v1/staff': return await handleManageStaff(req, headers);
       case '/v1/catalog': return await handleUpdateCatalog(req, headers);
       case '/v1/welcome': return await handleWelcomeEmail(req, headers);
+      case '/v1/debug-orders': return await handleDebugOrders(req, headers);
       case '/v1/generate-daily-orders': return await handleGenerateDailyOrders(req, headers);
       case '/v1/subscriptions': return await handleManageSubscriptions(req, headers);
       case '/v1/orders/manage': return await handleOrderAction(req, headers);
       case '/v1/dispatch': return await handleDispatchAction(req, headers);
+      case '/v1/cleanup-proofs': return await handleCleanupProofs(req, headers);
       default:
         return new Response(JSON.stringify({ error: `Not Found: ${path}` }), { status: 404, headers: { ...headers, 'Content-Type': 'application/json' } });
     }
   } catch (err: any) {
-    return new Response(JSON.stringify({ error: err.message }), { status: 400, headers: { ...headers, 'Content-Type': 'application/json' } });
+    const errorBody = { error: err.message || err.toString(), stack: err.stack };
+    return new Response(JSON.stringify(errorBody), { status: 200, headers: { ...headers, 'Content-Type': 'application/json' } });
   }
 });

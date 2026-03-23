@@ -56,10 +56,10 @@ export function TermsPage({ onBack }: { onBack: () => void }) {
   return (
     <LegalLayout title="Terms & Conditions" lastUpdated="March 20, 2026" onBack={onBack}>
       <h2>1. Acceptance of Terms</h2>
-      <p>By accessing or using THE FIT BOWL platform, you agree to be bound by these Terms & Conditions. If you disagree with any part of these terms, you may not access our service.</p>
+      <p>By accessing or using THE FIT BOWLS platform, you agree to be bound by these Terms & Conditions. If you disagree with any part of these terms, you may not access our service.</p>
       
       <h2 className="mt-8">2. Service Description</h2>
-      <p>THE FIT BOWL provides healthy meal preparation and delivery services. We offer regular one-time orders, personalized subscription plans, and group orders.</p>
+      <p>THE FIT BOWLS provides healthy meal preparation and delivery services. We offer regular one-time orders, personalized subscription plans, and group orders.</p>
 
       <h2 className="mt-8">3. Account Responsibilities</h2>
       <p>You are responsible for maintaining the confidentiality of your account credentials (like your OTP access) and for all activities that occur under your account. You must provide accurate and complete information when creating an account.</p>
@@ -127,7 +127,7 @@ export function AboutPage({ onBack }: { onBack: () => void }) {
         </div>
       </div>
       <p className="text-xl text-center font-medium text-slate-800 mb-8">
-        Welcome to <strong>THE FIT BOWL</strong> — the premier health-conscious cloud kitchen.
+        Welcome to <strong>THE FIT BOWLS</strong> — the premier health-conscious cloud kitchen.
       </p>
       <div className="space-y-6 text-slate-600">
         <p>

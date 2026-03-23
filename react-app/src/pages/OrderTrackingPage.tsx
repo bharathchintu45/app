@@ -253,7 +253,7 @@ function SupportModal({
 
   const orderNum = order.order_number;
   const slot = getSlotName(order.order_items?.[0]?.item_name || "");
-  const waMessage = encodeURIComponent(`Hi THE FIT BOWL, I need help with my order #${orderNum} (${slot} Slot).`);
+  const waMessage = encodeURIComponent(`Hi THE FIT BOWLS, I need help with my order #${orderNum} (${slot} Slot).`);
   const waUrl = `https://wa.me/${supportWhatsApp}?text=${waMessage}`;
 
   return (

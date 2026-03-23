@@ -11,7 +11,7 @@ export function OrderLabel({ order }: { order: OrderReceipt }) {
       
       {/* BRANDING: CLEAN & TASTEFUL */}
       <div className="text-center mb-1">
-        <div className="text-[16px] font-black tracking-tight leading-none">THE FIT BOWL</div>
+        <div className="text-[16px] font-black tracking-tight leading-none">THE FIT BOWLS</div>
         <div className="text-[7px] font-bold uppercase tracking-[3px] border-b border-black pb-1 mb-1">Precision Nutrition</div>
       </div>
 
@@ -99,7 +99,7 @@ export function OrderLabel({ order }: { order: OrderReceipt }) {
       <div className="text-center pt-2 border-t border-dashed border-black/20 mt-2">
         <div className="text-[9px] font-black tracking-widest uppercase mb-0.5">Eat Clean • Feel Great</div>
         <div className="text-[7px] opacity-70">Support: +91 85009 29080</div>
-        <div className="text-[6px] mt-1 opacity-50 uppercase font-bold tracking-tighter">Precision delivery by THE FIT BOWL</div>
+        <div className="text-[6px] mt-1 opacity-50 uppercase font-bold tracking-tighter">Precision delivery by THE FIT BOWLS</div>
       </div>
       
     </div>

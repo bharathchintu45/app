@@ -17,7 +17,7 @@ export function Footer() {
               <ChefHat className="w-6 h-6 text-emerald-600" />
             </div>
             <span className="text-xl font-black tracking-tight text-slate-900 uppercase">
-              The <span className="text-emerald-500">Fit Bowl</span>
+              The <span className="text-emerald-500">Fit Bowls</span>
             </span>
           </div>
           <p className="text-slate-500 text-sm leading-relaxed mb-6">
@@ -64,7 +64,7 @@ export function Footer() {
       </div>
       
       <div className="pt-8 border-t border-slate-200 flex flex-col md:flex-row items-center justify-between text-xs text-slate-400">
-        <p>© {new Date().getFullYear()} THE FIT BOWL. All rights reserved.</p>
+        <p>© {new Date().getFullYear()} THE FIT BOWLS. All rights reserved.</p>
         <p className="mt-2 md:mt-0">FSSAI License: [Pending]</p>
       </div>
     </footer>

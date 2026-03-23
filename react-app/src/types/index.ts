@@ -132,6 +132,7 @@ export interface OrderReceipt {
   };
   estimatedArrival?: string;
   image?: string;
+  proof_image_url?: string;
 }
 
 export interface SubscriptionSwap {

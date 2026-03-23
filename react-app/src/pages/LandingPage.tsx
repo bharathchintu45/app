@@ -6,7 +6,7 @@ import { useMenu } from "../hooks/useMenu";
 import { useAppSetting, useAppSettingNumber, useAppSettingString } from "../hooks/useAppSettings";
 import { Button } from "../components/ui/Button";
 import { Input } from "../components/ui/Input";
-import { clamp } from "../lib/format";
+import { clamp, getCurrentTimeIndia } from "../lib/format";
 import { Sparkles, ArrowRight, UtensilsCrossed, Check, Search, ShoppingBag, Sprout, Users, X, ChevronLeft, ChevronRight } from "lucide-react";
 import { MenuItemModal } from "../components/ui/MenuItemModal";
 import { cn } from "../lib/utils";
@@ -71,7 +71,7 @@ export function LandingPage({
   const storeCloseWeekend = useAppSettingString("store_close_weekend", "21:00");
 
   const storeStatus = useMemo(() => {
-    const now = new Date();
+    const now = getCurrentTimeIndia();
     const hours = now.getHours();
     const minutes = now.getMinutes();
     const currentTime = hours * 60 + minutes;
@@ -274,7 +274,7 @@ export function LandingPage({
           </div>
         </div>
         <h1 className="text-3xl md:text-4xl font-bold tracking-tight">
-          THE FIT BOWL<br />
+          THE FIT BOWLS<br />
           <span className="text-black/50">Eat smart. Track macros. Stay on plan.</span>
         </h1>
     <p className="mt-4 text-black/55 max-w-xl mx-auto">

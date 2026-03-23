@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { 
   Sparkles, 
@@ -9,7 +9,8 @@ import {
   ShieldCheck, 
   Settings,
   BarChart3,
-  CalendarDays
+  CalendarDays,
+  ArrowLeft
 } from "lucide-react";
 import { LuxuryLabel } from "../components/ui/Typography";
 import { cn } from "../lib/utils";
@@ -26,14 +27,14 @@ import DispatchTab from "../components/admin/DispatchTab";
 
 type AdminTab = "catalog" | "stock" | "subscriptions" | "all_orders" | "customers" | "staff" | "analytics" | "settings" | "dispatch";
 
-export function AdminPage() {
-  const [activeTab, setActiveTab] = useState<AdminTab>("catalog");
-  const [toast, setToast] = useState<string | null>(null);
+interface AdminPageProps {
+  user: any;
+  onBack: () => void;
+  showToast: (msg: string) => void;
+}
 
-  const showToast = useCallback((msg: string) => {
-    setToast(msg);
-    setTimeout(() => setToast(null), 3500);
-  }, []);
+export function AdminPage({ user, onBack, showToast }: AdminPageProps) {
+  const [activeTab, setActiveTab] = useState<AdminTab>("catalog");
 
   const tabs: { id: AdminTab; label: string; icon: any; color: string }[] = [
     { id: 'catalog', label: 'Catalog', icon: UtensilsCrossed, color: 'emerald' },
@@ -64,27 +65,31 @@ export function AdminPage() {
 
   return (
     <div className="min-h-screen bg-slate-50 font-sans text-slate-900 selection:bg-indigo-100 selection:text-indigo-900">
-      {/* Toast Notification */}
-      <AnimatePresence>
-        {toast && (
-          <motion.div 
-            initial={{ opacity: 0, y: 20, scale: 0.9 }} 
-            animate={{ opacity: 1, y: 0, scale: 1 }} 
-            exit={{ opacity: 0, y: 20, scale: 0.9 }}
-            className="fixed bottom-8 left-1/2 -translate-x-1/2 z-[100] px-6 py-3 bg-slate-900 text-white rounded-2xl shadow-2xl flex items-center gap-3 border border-slate-800"
-          >
-            <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-            <span className="text-sm font-bold tracking-tight">{toast}</span>
-          </motion.div>
-        )}
-      </AnimatePresence>
 
       <div className="max-w-[1600px] mx-auto p-4 md:p-8">
         <header className="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-12">
           <div>
+            <button 
+              onClick={onBack}
+              className="group flex items-center gap-2 text-slate-400 hover:text-slate-900 transition-colors mb-4 font-bold text-sm"
+            >
+              <ArrowLeft size={16} className="transition-transform group-hover:-translate-x-1" />
+              Back to Portal
+            </button>
             <LuxuryLabel text="Control Center" />
             <h1 className="text-4xl md:text-5xl font-black tracking-tighter text-slate-900 mt-2">Admin Dashboard</h1>
             <p className="text-slate-500 font-medium mt-2 max-w-md">Orchestrate the TFB ecosystem. Content, logistics, and user intelligence.</p>
+            
+            {/* User Greeting */}
+            <div className="flex items-center gap-3 mt-6 p-3 bg-white/50 rounded-2xl border border-slate-100 w-fit">
+              <div className="h-8 w-8 rounded-full bg-slate-900 flex items-center justify-center text-[10px] font-black text-white">
+                {user?.name?.charAt(0) || "A"}
+              </div>
+              <div className="flex flex-col">
+                <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 leading-none">Logged in as</span>
+                <span className="text-sm font-bold text-slate-700">{user?.name || 'Administrator'}</span>
+              </div>
+            </div>
           </div>
           <div className="flex items-center gap-4 bg-white p-2 rounded-2xl shadow-sm border border-slate-100 italic font-medium text-slate-400 text-sm px-6">
             <span>Server Status:</span>

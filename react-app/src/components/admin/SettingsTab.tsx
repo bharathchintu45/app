@@ -193,6 +193,7 @@ export default function SettingsTab({ showToast, fetchOrders }: SettingsTabProps
       const { data, error } = await api.v1.generateDailyOrders(targetStr);
       
       if (error) throw error;
+      if (data && data.error) throw new Error(`Backend Error: ${data.error} | Stack: ${data.stack}`);
       
       setRunNowResult({ success: true, message: `Orders generated for ${targetStr}`, created: data.created, skipped: 0 });
       showToast(`✅ Done: ${data.created} order(s) created`);
