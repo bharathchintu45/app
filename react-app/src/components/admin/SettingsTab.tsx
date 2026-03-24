@@ -195,8 +195,8 @@ export default function SettingsTab({ showToast, fetchOrders }: SettingsTabProps
         // Try to extract body from FunctionsHttpError for debugging
         let detail = error.message || 'Unknown edge function error';
         try {
-          if (error.context && typeof error.context.json === 'function') {
-            const body = await error.context.json();
+          if ((error as any).context && typeof (error as any).context.json === 'function') {
+            const body = await (error as any).context.json();
             detail = JSON.stringify(body);
           }
         } catch (_) { /* ignore parse errors */ }

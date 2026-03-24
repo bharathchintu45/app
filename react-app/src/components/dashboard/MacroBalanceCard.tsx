@@ -15,7 +15,6 @@ export const MacroBalanceCard = React.memo(({
   plan, 
   subscription, 
   selectedDayPlan, 
-  selectedDayHold,
   slotAddons
 }: MacroBalanceCardProps) => {
   const { values, targets, calPct, calBarPct, isCalExtreme } = useMemo(() => {
