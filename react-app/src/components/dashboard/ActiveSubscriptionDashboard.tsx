@@ -24,7 +24,8 @@ export function ActiveSubscriptionDashboard({
   selectedDate,
   setSelectedDate,
   todayKey,
-  chefNote
+  chefNote,
+  slotAddons
 }: {
   subscription: any;
   plan: any;
@@ -39,11 +40,16 @@ export function ActiveSubscriptionDashboard({
   selectedDate: string;
   setSelectedDate: (date: string) => void;
   chefNote?: string;
+  slotAddons?: any;
 }) {
   const now = new Date();
-  const currentHour = now.getHours();
-
-
+  
+  // Strongly type the current hour to IST (Asia/Kolkata) so device timezone settings don't bypass the cutoff
+  const currentHour = parseInt(new Intl.DateTimeFormat('en-US', {
+    hour: 'numeric',
+    hour12: false,
+    timeZone: 'Asia/Kolkata'
+  }).format(now), 10);
   const [dateOrders, setDateOrders] = useState<any[]>([]);
 
   useEffect(() => {
@@ -213,6 +219,7 @@ export function ActiveSubscriptionDashboard({
             subscription={subscription}
             selectedDayPlan={selectedDayPlan}
             selectedDayHold={selectedDayHold}
+            slotAddons={slotAddons}
           />
         </div>
       </div>
@@ -224,12 +231,22 @@ export function ActiveSubscriptionDashboard({
           {/* Timeline Selector */}
           <div className="space-y-3 md:space-y-4">
             <div className="flex items-center justify-between gap-2">
-              <SectionTitle icon={CalendarDays} title="Meal Planner" subtitle="Upcoming 7 days" />
+              <SectionTitle 
+                icon={CalendarDays} 
+                title={dates.indexOf(selectedDate) >= durationDays ? "Rollover Buffer Day" : "Meal Planner"} 
+                subtitle={dates.indexOf(selectedDate) >= durationDays ? "Extra days added for reschedules" : "Upcoming plan days"} 
+              />
+              {dates.indexOf(selectedDate) >= durationDays && (
+                <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-purple-100 border border-purple-200 text-purple-700 text-[10px] font-black uppercase tracking-widest animate-pulse">
+                  <Sparkles size={10} /> Plan Transition
+                </div>
+              )}
             </div>
             
             <div className="flex gap-1.5 sm:gap-2 md:gap-3 w-full overflow-x-auto pb-4 pt-2 no-scrollbar scroll-smooth -mx-1 px-1">
-              {dates.map((dk) => {
+              {dates.map((dk, idx) => {
                 const isSelected = selectedDate === dk;
+                const isRollover = idx >= durationDays;
                 const isDayLocked = isLocked(dk);
                 const dayDate = parseDateKeyToDate(dk);
                 const dayName = dayDate.toLocaleDateString("en-IN", { weekday: "short" });
@@ -247,14 +264,16 @@ export function ActiveSubscriptionDashboard({
                     className={cn(
                       "flex-shrink-0 relative w-12 sm:w-14 md:w-20 h-16 sm:h-20 md:h-28 rounded-xl sm:rounded-2xl md:rounded-3xl border-2 transition-all duration-300 flex flex-col items-center justify-center gap-0.5 sm:gap-1 group",
                       isSelected 
-                        ? "bg-slate-900 border-slate-900 text-white shadow-xl shadow-slate-900/20 scale-105" 
+                        ? (isRollover ? "bg-purple-900 border-purple-900 text-white shadow-xl shadow-purple-900/20 scale-105" : "bg-slate-900 border-slate-900 text-white shadow-xl shadow-slate-900/20 scale-105")
                         : isCompleted
                           ? "bg-white border-emerald-500 text-slate-600 hover:bg-emerald-50/30"
-                          : "bg-white border-slate-100 hover:border-slate-300 text-slate-600 hover:bg-slate-50",
+                          : (isRollover ? "bg-purple-50/30 border-purple-100 hover:border-purple-300 text-slate-600 hover:bg-purple-50" : "bg-white border-slate-100 hover:border-slate-300 text-slate-600 hover:bg-slate-50"),
                       held && !isSelected && "bg-rose-50 border-rose-200 text-rose-700"
                     )}
                   >
-                    <div className={cn("text-[8px] sm:text-[9px] font-black uppercase tracking-normal sm:tracking-widest opacity-60", isSelected && "opacity-100")}>{dayName}</div>
+                    <div className={cn("text-[8px] sm:text-[9px] font-black uppercase tracking-normal sm:tracking-widest opacity-60", isSelected && "opacity-100")}>
+                      {isRollover && !isSelected ? "Buffer" : dayName}
+                    </div>
                     <div className="text-lg sm:text-xl md:text-2xl font-black leading-none">{dayNum}</div>
                     <div className="mt-1">
                       {held ? (
@@ -273,7 +292,8 @@ export function ActiveSubscriptionDashboard({
                         </div>
                       )}
                     </div>
-                    {isDayLocked && !isCompleted && <div className="absolute -top-1 -right-1 p-1 rounded-full bg-slate-900 text-white shadow-lg border border-white/20"><Lock size={8} /></div>}
+                    {isDayLocked && !isCompleted && !isRollover && <div className="absolute -top-1 -right-1 p-1 rounded-full bg-slate-900 text-white shadow-lg border border-white/20"><Lock size={8} /></div>}
+                    {isRollover && <div className="absolute -top-1 -right-1 p-1 rounded-full bg-purple-500 text-white shadow-lg border border-white/20 text-[8px]">🎁</div>}
                   </button>
                 );
               })}
@@ -285,7 +305,12 @@ export function ActiveSubscriptionDashboard({
             {/* Header: stack on mobile to prevent collision */}
             <CardHeader className="bg-slate-50/50 px-4 py-4 md:px-8 md:py-6 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                <div className="min-w-0">
-                  <h3 className="text-lg md:text-xl font-bold text-slate-900 truncate">{formatDateIndia(selectedDate)}</h3>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-lg md:text-xl font-bold text-slate-900 truncate">{formatDateIndia(selectedDate)}</h3>
+                    {dates.indexOf(selectedDate) >= durationDays && (
+                      <span className="px-2 py-0.5 bg-purple-100 text-purple-700 text-[10px] font-black uppercase tracking-widest rounded-md">Rollover Day</span>
+                    )}
+                  </div>
                   {(() => {
                     const activeSlotsForDay = plan.allowedSlots.filter((s: Slot) => !selectedDayHold.day && !selectedDayHold.slots[s]);
                     const allDelivered = activeSlotsForDay.length > 0 && activeSlotsForDay.every((s: Slot) => getSlotStatus(s) === 'delivered');
@@ -320,7 +345,7 @@ export function ActiveSubscriptionDashboard({
                   })()}
                </div>
                
-               {!isLocked(selectedDate) && (
+               {!isLocked(selectedDate) && dates.indexOf(selectedDate) < durationDays && (
                  <Button 
                    variant={selectedDayHold.day ? "primary" : "outline"}
                    size="sm"
@@ -337,15 +362,23 @@ export function ActiveSubscriptionDashboard({
             <CardContent className="p-3 md:p-8 space-y-3 md:space-y-6">
               {plan.allowedSlots.map((s: Slot) => {
                 const item = selectedDayPlan[s];
+                const isSelectedRollover = dates.indexOf(selectedDate) >= durationDays;
                 const isMealHeld = selectedDayHold.day || selectedDayHold.slots[s];
                 const locked = isLocked(selectedDate);
                 const SlotIcon = s === "Slot1" ? Coffee : s === "Slot2" ? Sun : Moon;
                 
+                // On Rollover buffer days, NEVER show empty slots.
+                // Only show slots that have an actual rescheduled meal in them.
+                if (isSelectedRollover && !item) {
+                   return null;
+                }
+
                 return (
                   <div key={s} className={cn(
                     "rounded-2xl border transition-all overflow-hidden",
                     locked ? "bg-slate-50/30 border-slate-100 opacity-80" : "bg-white border-slate-100 hover:border-slate-200 hover:shadow-lg",
-                    isMealHeld && "bg-rose-50/30 border-rose-100 shadow-inner"
+                    isMealHeld && "bg-rose-50/30 border-rose-100 shadow-inner",
+                    isSelectedRollover && item && "border-purple-200 shadow-sm shadow-purple-900/5"
                   )}>
                     {/* Card Top: image + info */}
                     <div className="flex items-center gap-2 sm:gap-3 p-3 md:p-6">
@@ -377,6 +410,16 @@ export function ActiveSubscriptionDashboard({
                         <h4 className={cn("text-sm md:text-lg font-black tracking-tight truncate", isMealHeld ? "text-rose-900/40" : "text-slate-900")}>
                           {isMealHeld ? "Meal On Hold" : item ? item.name : "Choose your meal"}
                         </h4>
+                        {isMealHeld && holds[selectedDate]?.rescheduledTo && (
+                          <div className="flex items-center gap-1.5 mt-1 text-[10px] font-bold text-rose-600 italic bg-rose-50 px-2 py-0.5 rounded-lg w-fit border border-rose-100/50">
+                            <ArrowRight size={10} /> Moved to {formatDateIndia(holds[selectedDate].rescheduledTo)}
+                          </div>
+                        )}
+                        {isSelectedRollover && item && (
+                           <div className="inline-flex items-center gap-1 mt-1 px-1.5 py-0.5 rounded-md bg-purple-100 text-purple-700 text-[9px] font-black uppercase tracking-widest">
+                             🎁 Rescheduled Meal
+                           </div>
+                        )}
                         {!isMealHeld && item && (
                            <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
                              <span className="flex items-center gap-1 text-[10px] font-bold text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded-full">
@@ -390,8 +433,8 @@ export function ActiveSubscriptionDashboard({
                       </div>
                     </div>
 
-                    {/* Card Bottom: action buttons */}
-                    {!locked && (
+                    {/* Card Bottom: action buttons — ONLY on regular plan days, NOT buffer days */}
+                    {!locked && !isSelectedRollover && (
                       <div className="flex flex-col gap-2 px-3 pb-3 md:px-6 md:pb-6 border-t border-slate-100 pt-2.5">
                         {!selectedDayHold.day && (
                           <button
@@ -436,6 +479,18 @@ export function ActiveSubscriptionDashboard({
                   </div>
                 );
               })}
+
+              {/* Empty state for buffer days with no rescheduled meals */}
+              {dates.indexOf(selectedDate) >= durationDays && 
+               !plan.allowedSlots.some((s: Slot) => !!selectedDayPlan[s]) && (
+                <div className="text-center py-8 px-4">
+                  <div className="text-3xl mb-3">📦</div>
+                  <h4 className="text-sm font-black text-slate-700 mb-1">No Meals Rescheduled Here</h4>
+                  <p className="text-xs text-slate-400 font-medium max-w-xs mx-auto">
+                    This buffer day is available. Hold a meal from your plan and reschedule it to this date.
+                  </p>
+                </div>
+              )}
             </CardContent>
           </Card>
         </div>

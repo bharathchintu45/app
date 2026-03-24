@@ -8,21 +8,38 @@ interface MacroBalanceCardProps {
   subscription: any;
   selectedDayPlan: Partial<Record<Slot, MenuItemType | null>>;
   selectedDayHold: { day: boolean; slots: Record<Slot, boolean> };
+  slotAddons?: any;
 }
 
 export const MacroBalanceCard = React.memo(({ 
   plan, 
   subscription, 
   selectedDayPlan, 
-  selectedDayHold 
+  selectedDayHold,
+  slotAddons
 }: MacroBalanceCardProps) => {
   const { values, targets, calPct, calBarPct, isCalExtreme } = useMemo(() => {
-    const activeMeals = (plan.allowedSlots as Slot[])
-      .filter((s) => !selectedDayHold.day && !selectedDayHold.slots[s])
+    // We show the "Planned" macros for the day, even if it's on hold, 
+    // so the user can see what they are aiming for or moving around.
+    const plannedMeals = (plan.allowedSlots as Slot[])
       .map((s) => selectedDayPlan[s])
       .filter(Boolean) as MenuItem[];
     
-    const v = sumMacros(activeMeals);
+    const v = sumMacros(plannedMeals);
+    
+    // Add Addons if passed from parent
+    if (slotAddons) {
+      for (const slot of (plan.allowedSlots as Slot[])) {
+        const addons = slotAddons[slot] || [];
+        for (const a of addons) {
+          v.calories += (a.item.calories || 0) * a.qty;
+          v.protein += (a.item.protein || 0) * a.qty;
+          v.carbs += (a.item.carbs || 0) * a.qty;
+          v.fat += (a.item.fat || 0) * a.qty;
+        }
+      }
+    }
+
     const t = subscription?.meta?.targets || { calories: 2000, protein: 150, carbs: 200, fat: 70 };
     const cp = Math.round((v.calories / t.calories) * 100);
     
@@ -33,7 +50,7 @@ export const MacroBalanceCard = React.memo(({
       calBarPct: Math.min(100, cp),
       isCalExtreme: cp >= 110
     };
-  }, [plan.allowedSlots, selectedDayPlan, selectedDayHold, subscription?.meta?.targets]);
+  }, [plan.allowedSlots, selectedDayPlan, slotAddons, subscription?.meta?.targets]);
 
   return (
     <div className="w-full sm:w-[300px] lg:w-[320px] flex flex-col items-center gap-4 sm:gap-5 p-6 sm:p-7 md:p-9 rounded-[2.5rem] md:rounded-[3rem] bg-white/5 backdrop-blur-2xl border border-white/20 shadow-2xl shadow-black/40">

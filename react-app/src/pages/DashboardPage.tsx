@@ -16,6 +16,7 @@ import { supabase } from "../lib/supabase";
 import { SkeletonDashboard } from "../components/ui/Skeleton";
 import { useRazorpay } from "../hooks/useRazorpay";
 import { SwapConfirmationModal } from "../components/dashboard/SwapConfirmationModal";
+import { RescheduleModal } from "../components/dashboard/RescheduleModal";
 
 export function DashboardPage({
   user,
@@ -80,6 +81,17 @@ export function DashboardPage({
   const tomorrowKey = dayKey(addDays(new Date(), 1));
   const builderStartKey = startDates[subscription] || startDates['last_selected'] || tomorrowKey;
   
+
+  // Isolated state for "Explore Mode"
+  const [explorePlanMap, setExplorePlanMap] = useState<PlanMap>({});
+  const [exploreHolds, setExploreHolds] = useState<HoldsMap>({});
+
+  const isExploring = viewMode === "planner" && activeSubscription && activeSubscription.status === "active";
+  const currentPlanMap = isExploring ? explorePlanMap : planMap;
+  const currentSetPlanMap = isExploring ? setExplorePlanMap : setPlanMap;
+  const currentHolds = isExploring ? exploreHolds : holds;
+  const currentSetHolds = isExploring ? setExploreHolds : setHolds;
+
   // Use DB start date for active subs, otherwise fallback to builder date
   const startKey = (viewMode === "tracking" && activeSubscription) 
     ? (activeSubscription.start_date || activeSubscription.meta?.startDate || (activeSubscription.delivery_date ? activeSubscription.delivery_date.split('T')[0] : builderStartKey))
@@ -87,11 +99,31 @@ export function DashboardPage({
     
   const startDate = useMemo(() => parseDateKeyToDate(startKey), [startKey]);
   const dates = useMemo(() => {
-    const duration = (viewMode === "tracking" && activeSubscription?.meta?.durationDays) 
-      ? activeSubscription.meta.durationDays 
-      : plan.duration;
-    return Array.from({ length: duration }, (_, i) => dayKey(addDays(startDate, i)));
-  }, [plan.duration, startDate, viewMode, activeSubscription]);
+    if (viewMode === "tracking" && activeSubscription) {
+       const dbStart = activeSubscription.start_date || activeSubscription.meta?.startDate || (activeSubscription.delivery_date ? activeSubscription.delivery_date.split('T')[0] : startKey);
+       const durationDays = activeSubscription.total_days || activeSubscription.meta?.durationDays || plan.duration || 30;
+       
+       // 1. Generate the base plan days (start → start + duration)
+       const baseDays = Array.from({ length: durationDays }, (_, i) => dayKey(addDays(parseDateKeyToDate(dbStart.split('T')[0]), i)));
+       const baseDaySet = new Set(baseDays);
+
+       // 2. Find buffer dates that have ACTUAL rescheduled meals in them
+       const bufferDates: string[] = [];
+       for (const dk of Object.keys(currentPlanMap)) {
+         if (baseDaySet.has(dk)) continue; // Skip regular plan days
+         const daySlots = currentPlanMap[dk] || {};
+         const hasAnyMeal = Object.values(daySlots).some(it => !!it);
+         if (hasAnyMeal) bufferDates.push(dk);
+       }
+
+       // 3. Sort buffer dates and append them
+       bufferDates.sort();
+       return [...baseDays, ...bufferDates];
+    }
+
+    // Builder Mode (Creation phase)
+    return Array.from({ length: plan.duration }, (_, i) => dayKey(addDays(startDate, i)));
+  }, [plan.duration, plan.allowedSlots, startDate, viewMode, activeSubscription, startKey, currentPlanMap]);
 
   const initialDate = useMemo(() => {
     if (viewMode !== "tracking" || !dates.length) return startKey;
@@ -103,6 +135,14 @@ export function DashboardPage({
     // If we've finished, default to last day
     return dates[dates.length - 1];
   }, [viewMode, dates, startKey]);
+
+  // Reliable calculation of the ORIGINAL end date (ignoring extensions caused by reschedules)
+  const originalEndDate = useMemo(() => {
+    if (!activeSubscription) return dates[dates.length - 1] || startKey;
+    const dbStart = activeSubscription.start_date || activeSubscription.meta?.startDate || (activeSubscription.delivery_date ? activeSubscription.delivery_date.split('T')[0] : startKey);
+    const durationDays = activeSubscription.total_days || activeSubscription.meta?.durationDays || plan.duration || 30;
+    return dayKey(addDays(parseDateKeyToDate(dbStart.split('T')[0]), durationDays - 1));
+  }, [activeSubscription, dates, startKey, plan.duration]);
 
   const [selectedDate, setSelectedDate] = useState(initialDate);
   useEffect(() => { setSelectedDate(initialDate); }, [initialDate]);
@@ -169,6 +209,7 @@ export function DashboardPage({
   const [pendingSwap, setPendingSwap] = useState<MenuItem | null>(null);
   const { openPayment, loading: payLoading } = useRazorpay();
   const [dbLoading, setDbLoading] = useState(false);
+  const [rescheduleData, setRescheduleData] = useState<{ date: string, scope: "day" | Slot } | null>(null);
 
   const [showSubWarning, setShowSubWarning] = useState(false);
   useEffect(() => {
@@ -176,16 +217,6 @@ export function DashboardPage({
       setShowSubWarning(true);
     }
   }, [viewMode, activeSubscription, dashboardTab]);
-
-  // Isolated state for "Explore Mode"
-  const [explorePlanMap, setExplorePlanMap] = useState<PlanMap>({});
-  const [exploreHolds, setExploreHolds] = useState<HoldsMap>({});
-
-  const isExploring = viewMode === "planner" && activeSubscription && activeSubscription.status === "active";
-  const currentPlanMap = isExploring ? explorePlanMap : planMap;
-  const currentSetPlanMap = isExploring ? setExplorePlanMap : setPlanMap;
-  const currentHolds = isExploring ? exploreHolds : holds;
-  const currentSetHolds = isExploring ? setExploreHolds : setHolds;
 
   function handleSwapRequest(item: MenuItem) {
     setPendingSwap(item);
@@ -290,42 +321,131 @@ export function DashboardPage({
   }
 
   async function toggleHold(dateKey: string, which: "day" | Slot) {
-    // Compute next state optimistically
-    const cur = currentHolds[dateKey] || { day: false, slots: {} as Record<Slot, boolean> };
-    const next = { ...currentHolds };
-    if (which === "day") next[dateKey] = { ...cur, day: !cur.day };
-    else next[dateKey] = { ...cur, slots: { ...cur.slots, [which]: !cur.slots[which] } };
-    
-    // Optimistic UI update
-    currentSetHolds(next);
-
     if (!activeSubscription || viewMode === "planner") {
       // Allow local hold state while building a plan, but skip DB sync if no sub yet or if just exploring
+      const cur = currentHolds[dateKey] || { day: false, slots: {} as Record<Slot, boolean> };
+      const next = { ...currentHolds };
+      if (which === "day") next[dateKey] = { ...cur, day: !cur.day };
+      else next[dateKey] = { ...cur, slots: { ...cur.slots, [which]: !cur.slots[which] } };
+      currentSetHolds(next);
       return;
     }
+
+    const cur = currentHolds[dateKey] || { day: false, slots: {} as Record<Slot, boolean> };
+    const isCurrentlyHeld = which === "day" ? cur.day : cur.slots[which];
+
+    if (isCurrentlyHeld) {
+      // UNHOLD logic (optimistic delete)
+      if (!window.confirm("Restore this meal to the original date?")) return;
+      // 1. Pull back the hold status (atomic cleanup of both tables)
+      const payload = {
+        p_sub_id: activeSubscription.id,
+        p_date: dateKey,
+        p_slot: which === "day" ? null : which
+      };
+
+      const { error } = await supabase.rpc('unhold_meal', payload);
       
-    // Sync to DB
-    const payload = next[dateKey];
-    const upsertData = {
-      subscription_id: activeSubscription.id,
-      hold_date: dateKey,
-      is_full_day: payload.day,
-      slots: payload.slots,
-      updated_at: new Date().toISOString()
+      if (error) {
+        console.error("[Unhold] failed:", error);
+        showToast(`Restore failed: ${error.message}`);
+      } else {
+        showToast("Meal restored to original date! 🏠");
+        
+        // 1. Clear the hold status
+        const next = { ...currentHolds };
+        if (which === "day") next[dateKey] = { ...cur, day: false };
+        else next[dateKey] = { ...cur, slots: { ...cur.slots, [which]: false } };
+        currentSetHolds(next);
+
+        // 2. CRITICAL: Remove the rescheduled meal from the buffer day's planMap
+        const rescheduledTo = cur.rescheduledTo;
+        if (rescheduledTo) {
+          currentSetPlanMap(prev => {
+            const bufferDay = { ...(prev[rescheduledTo] || {}) };
+            if (which === "day") {
+              plan.allowedSlots.forEach((s: Slot) => { delete bufferDay[s]; });
+            } else {
+              delete bufferDay[which as Slot];
+            }
+            // If buffer day is now empty, delete the key entirely
+            const hasAnyMeal = Object.values(bufferDay).some(v => !!v);
+            const newMap = { ...prev };
+            if (!hasAnyMeal) {
+              delete newMap[rescheduledTo];
+            } else {
+              newMap[rescheduledTo] = bufferDay;
+            }
+            return newMap;
+          });
+
+          // Auto-navigate back to the original date
+          setSelectedDate(dateKey);
+        }
+      }
+    } else {
+      // Prompt for Reschedule Date
+      setRescheduleData({ date: dateKey, scope: which });
+    }
+  }
+
+  async function handleConfirmReschedule(targetDate: string, targetSlot?: Slot) {
+    if (!rescheduleData || !activeSubscription) return;
+    const { date, scope } = rescheduleData;
+    setDbLoading(true);
+
+    const dayPlan = planMap[date] || {};
+    const itemsToMove: { slot: Slot, item: MenuItem }[] = [];
+    
+    if (scope === 'day') {
+      plan.allowedSlots.forEach((s: Slot) => {
+        if (dayPlan[s]) itemsToMove.push({ slot: s, item: dayPlan[s]! });
+      });
+    } else {
+      if (dayPlan[scope]) itemsToMove.push({ slot: scope, item: dayPlan[scope]! });
+    }
+
+    const payload = {
+        p_sub_id: activeSubscription.id,
+        p_original_date: date,
+        p_new_date: targetDate,
+        p_is_full_day: scope === 'day',
+        p_items: itemsToMove.map(i => ({ 
+           original_slot: i.slot, 
+           target_slot: (scope !== 'day' && targetSlot) ? targetSlot : i.slot, 
+           menu_item_id: i.item.id 
+        }))
     };
 
-    console.log("[Hold] Upserting with subscription_id:", activeSubscription.id, upsertData);
+    const { error } = await supabase.rpc('reschedule_meal', payload);
 
-    const { error } = await supabase
-      .from("subscription_holds")
-      .upsert(upsertData, { onConflict: 'subscription_id,hold_date' });
-    
     if (error) {
-      console.error("[Hold] Error:", error);
-      // Roll back optimistic update
-      currentSetHolds(holds);
-      showToast(`Hold failed: ${error.message}`);
+       console.error("[Reschedule] failed:", error);
+       showToast(`Reschedule failed: ${error.message}`);
+    } else {
+       showToast("Meal rescheduled to buffer day successfully! 🎁");
+       
+       // Optimistic UI updates
+       const cur = currentHolds[date] || { day: false, slots: {} as Record<Slot, boolean> };
+       const next = { ...currentHolds };
+       if (scope === "day") next[date] = { ...cur, day: true, rescheduledTo: targetDate };
+       else next[date] = { ...cur, slots: { ...cur.slots, [scope]: true }, rescheduledTo: targetDate };
+       currentSetHolds(next);
+
+       currentSetPlanMap(prev => {
+         const targetDay = prev[targetDate] || {};
+         const newTarget = { ...targetDay };
+         itemsToMove.forEach(i => {
+            const mappedSlot = (scope !== 'day' && targetSlot) ? targetSlot : i.slot;
+            newTarget[mappedSlot] = i.item;
+         });
+         return { ...prev, [targetDate]: newTarget };
+       });
+       setSelectedDate(targetDate);
     }
+
+    setDbLoading(false);
+    setRescheduleData(null);
   }
 
 
@@ -420,6 +540,7 @@ export function DashboardPage({
                 selectedDate={selectedDate}
                 setSelectedDate={setSelectedDate}
                 chefNote={chefNote}
+                slotAddons={slotAddons}
               />
           ) : viewMode === "tracking" && activeSubscription?.status === 'removed_by_admin' ? (
             /* ── Admin removal state ── */
@@ -536,6 +657,23 @@ export function DashboardPage({
         oldItem={planMap[swapSlot.date]?.[swapSlot.slot]}
         newItem={pendingSwap}
         isLoading={payLoading || dbLoading}
+      />
+    )}
+    
+    {rescheduleData && activeSubscription && (
+      <RescheduleModal
+        isOpen={true}
+        onClose={() => setRescheduleData(null)}
+        onConfirm={handleConfirmReschedule}
+        originalDate={rescheduleData.date}
+        endDate={originalEndDate}
+        isFullDay={rescheduleData.scope === 'day'}
+        slot={rescheduleData.scope !== 'day' ? rescheduleData.scope : undefined}
+        itemsToMove={rescheduleData.scope === 'day' 
+          ? plan.allowedSlots.map(s => ({ slot: s, item: planMap[rescheduleData.date]?.[s] })).filter((x): x is { slot: Slot, item: MenuItem } => !!x.item)
+          : [{ slot: rescheduleData.scope as Slot, item: planMap[rescheduleData.date]?.[rescheduleData.scope as Slot]! }]}
+        allowedSlots={plan.allowedSlots}
+        isLoading={dbLoading}
       />
     )}
     <AnimatePresence>

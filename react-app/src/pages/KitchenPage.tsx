@@ -15,6 +15,13 @@ import { CustomerContextPanel, hasActiveSubscription } from "../components/kitch
 import { OrderEditModal } from "../components/kitchen/OrderEditModal";
 import { useAppSetting } from "../hooks/useAppSettings";
 
+const safeParse = (val: any) => {
+  if (typeof val === 'string') {
+    try { return JSON.parse(val); } catch (e) { return val; }
+  }
+  return val;
+};
+
 export function KitchenPage({ user, onBack, showToast }: { user: AppUser | null, onBack: () => void, showToast: (msg: string) => void }) {
   const [tab, setTab] = useState<"orders" | "groups" | "forecast" | "inbox" | "subscriptions" | "pickup">("orders");
   const [subSlotFilter, setSubSlotFilter] = useState<"All" | "Breakfast" | "Lunch" | "Dinner">("All");
@@ -45,6 +52,14 @@ export function KitchenPage({ user, onBack, showToast }: { user: AppUser | null,
   const [pickupShowOverride, setPickupShowOverride] = useState(false);
   const [pickupOverriding, setPickupOverriding] = useState(false);
   const pickupPinInputRef = useRef<HTMLInputElement>(null);
+  
+  // Helper to compare statuses interchangeably (spaces vs underscores vs casing)
+  const normalizeStatus = useCallback((s?: string) => {
+    if (!s) return "new";
+    let val = s.toLowerCase().trim();
+    if (val === 'pending') return 'new';
+    return val.replace(/\s+/g, '_');
+  }, []);
 
   function openPickupPinModal(orderId: string) {
     setPickupPinOrderId(orderId);
@@ -62,14 +77,22 @@ export function KitchenPage({ user, onBack, showToast }: { user: AppUser | null,
     setPickupPinError(false);
     const rawId = pickupPinOrderId.replace('-today', '');
     const { data: order } = await supabase.from('orders').select('meta').eq('id', rawId).single();
-    const correctOtp = order?.meta?.delivery_otp;
-    if (pickupPinValue === correctOtp) {
+    
+    const meta = safeParse(order?.meta);
+    const correctOtp = String(meta?.delivery_otp || "").trim();
+    const enteredOtp = String(pickupPinValue || "").trim();
+    
+    if (enteredOtp === correctOtp && correctOtp !== "") {
       await setStatus(pickupPinOrderId, "Delivered");
       setPickupPinSuccess(true);
       setTimeout(() => { setPickupPinModalOpen(false); setPickupPinSuccess(false); }, 2000);
     } else {
       setPickupPinError(true);
-      showToast("❌ Incorrect PIN. Ask the customer for the correct 4-digit code.");
+      if (!correctOtp) {
+        showToast("❌ PIN mismatch: No PIN found for this order. Customer should refresh their tracking page.");
+      } else {
+        showToast("❌ Incorrect PIN. Ask the customer for the correct 4-digit code.");
+      }
     }
     setPickupPinVerifying(false);
   }
@@ -79,7 +102,7 @@ export function KitchenPage({ user, onBack, showToast }: { user: AppUser | null,
     setPickupOverriding(true);
     const rawId = pickupPinOrderId.replace('-today', '');
     const { data: order } = await supabase.from('orders').select('meta').eq('id', rawId).single();
-    const currentMeta = order?.meta || {};
+    const currentMeta = safeParse(order?.meta) || {};
     await supabase.from('orders').update({
       meta: { ...currentMeta, pickup_override: true, override_at: new Date().toISOString() }
     }).eq('id', rawId);
@@ -201,15 +224,16 @@ export function KitchenPage({ user, onBack, showToast }: { user: AppUser | null,
         },
         payment: dbOrder.payment_status,
         meta: dbOrder.meta,
-        status: (
-          dbOrder.status === 'pending' ? 'New' :
-          dbOrder.status === 'preparing' ? 'Preparing' :
-          dbOrder.status === 'ready' ? 'Ready' :
-          dbOrder.status === 'out_for_delivery' ? 'Out for delivery' :
-          dbOrder.status === 'delivered' ? 'Delivered' :
-          dbOrder.status === 'cancelled' ? 'Cancelled' : 
-          'New'
-        ) as any,
+        status: (() => {
+          const st = dbOrder.status?.toLowerCase().replace(/[\s_]+/g, '_') || 'pending';
+          if (st === 'pending') return 'New';
+          if (st === 'preparing') return 'Preparing';
+          if (st === 'ready') return 'Ready';
+          if (st === 'out_for_delivery') return 'Out for delivery';
+          if (st === 'delivered') return 'Delivered';
+          if (st === 'cancelled') return 'Cancelled';
+          return 'New';
+        })() as any,
         priceSummary: {
           subtotal: dbOrder.subtotal,
           gst: dbOrder.gst_amount,
@@ -539,10 +563,11 @@ export function KitchenPage({ user, onBack, showToast }: { user: AppUser | null,
   const newSubCount = useMemo(() => subOrders.filter(o => !o.status || o.status === "New").length, [subOrders]);
   
   const subSlotCounts = useMemo(() => {
-    // Only count orders that still need processing in the kitchen
+    // Only count orders that still need processing in the kitchen (including out for delivery)
+    const activeStatues = ['new', 'preparing', 'ready', 'out_for_delivery'];
     const pending = subOrders.filter(o => {
-      const st = (o.status || "New").toLowerCase();
-      return st === "new" || st === "preparing" || st === "ready";
+      const st = normalizeStatus(o.status);
+      return activeStatues.includes(st);
     });
     
     return {
@@ -551,7 +576,7 @@ export function KitchenPage({ user, onBack, showToast }: { user: AppUser | null,
       Lunch: pending.filter(o => o.lines.some((l: any) => l.label.includes('[Lunch]') || l.label.includes('[Slot2]'))).length,
       Dinner: pending.filter(o => o.lines.some((l: any) => l.label.includes('[Dinner]') || l.label.includes('[Slot3]'))).length,
     };
-  }, [subOrders]);
+  }, [subOrders, normalizeStatus]);
 
   const slotFilteredSubOrders = useMemo(() => {
     let base = subOrders;
@@ -576,16 +601,10 @@ export function KitchenPage({ user, onBack, showToast }: { user: AppUser | null,
 
   const filteredSubOrders = useMemo(() => {
     return slotFilteredSubOrders.filter(o => {
-      const st = (o.status || "New").toLowerCase();
-      if (subSubTab === "new") return st === "new";
-      if (subSubTab === "preparing") return st === "preparing";
-      if (subSubTab === "ready") return st === "ready";
-      if (subSubTab === "out_for_delivery") return st === "out_for_delivery";
-      if (subSubTab === "delivered") return st === "delivered";
-      if (subSubTab === "cancelled") return st === "cancelled";
-      return false;
+      const st = normalizeStatus(o.status);
+      return st === subSubTab;
     });
-  }, [slotFilteredSubOrders, subSubTab]);
+  }, [slotFilteredSubOrders, subSubTab, normalizeStatus]);
 
   async function setStatus(id: string, status: KitchenStatus) {
     const rawId = id.replace('-today', '');
@@ -986,14 +1005,7 @@ export function KitchenPage({ user, onBack, showToast }: { user: AppUser | null,
                       { key: "cancelled" as const,        label: "Cancelled",        color: "border-rose-500 text-rose-700"      },
                     ]).map(({ key, label, color }) => {
                       const count = visibleGroupOrders.filter(o => {
-                        const st = o.status || "New";
-                        if (key === "new") return !o.status || st === "New";
-                        if (key === "preparing") return st === "Preparing";
-                        if (key === "ready") return st === "Ready";
-                        if (key === "out_for_delivery") return st === "Out for delivery";
-                        if (key === "delivered") return st === "Delivered";
-                        if (key === "cancelled") return st === "Cancelled";
-                        return false;
+                        return normalizeStatus(o.status) === key;
                       }).length;
                       return (
                         <button
@@ -1013,14 +1025,7 @@ export function KitchenPage({ user, onBack, showToast }: { user: AppUser | null,
                   <div className="flex flex-col gap-4">
                     {(() => {
                       const filtered = visibleGroupOrders.filter(o => {
-                        const st = o.status || "New";
-                        if (groupSubTab === "new") return !o.status || st === "New";
-                        if (groupSubTab === "preparing") return st === "Preparing";
-                        if (groupSubTab === "ready") return st === "Ready";
-                        if (groupSubTab === "out_for_delivery") return st === "Out for delivery";
-                        if (groupSubTab === "delivered") return st === "Delivered";
-                        if (groupSubTab === "cancelled") return st === "Cancelled";
-                        return false;
+                        return normalizeStatus(o.status) === groupSubTab;
                       });
                       if (filtered.length === 0) return (
                         <div className="py-12 text-center text-slate-400 font-medium italic bg-white rounded-xl border border-dashed border-slate-200">No orders in this status.</div>
@@ -1084,8 +1089,7 @@ export function KitchenPage({ user, onBack, showToast }: { user: AppUser | null,
                       { key: "cancelled" as const,        label: "Cancelled",        color: "border-rose-500 text-rose-700"      },
                     ]).map(({ key, label, color }) => {
                       const count = slotFilteredSubOrders.filter(o => {
-                        const st = (o.status || "New").toLowerCase();
-                        return st === key;
+                        return normalizeStatus(o.status) === key;
                       }).length;
                       return (
                       <div key={key} className="flex flex-col gap-1 shrink-0 items-center">
@@ -1103,9 +1107,19 @@ export function KitchenPage({ user, onBack, showToast }: { user: AppUser | null,
                           </label>
                         )}
                         {key === "preparing" && subSubTab === "preparing" && (
-                          <label className="flex items-center justify-center gap-1 text-[9px] uppercase font-black tracking-widest text-sky-600 pb-1 cursor-pointer bg-sky-50 px-1 rounded">
-                            <input type="checkbox" checked={autoReady} onChange={e => setAutoReady(e.target.checked)} className="accent-sky-600 w-3 h-3" /> Auto
-                          </label>
+                          <div className="flex flex-col gap-1 items-center">
+                            <label className="flex items-center justify-center gap-1 text-[9px] uppercase font-black tracking-widest text-sky-600 pb-1 cursor-pointer bg-sky-50 px-1 rounded">
+                              <input type="checkbox" checked={autoReady} onChange={e => setAutoReady(e.target.checked)} className="accent-sky-600 w-3 h-3" /> Auto
+                            </label>
+                            {count > 0 && (
+                              <button 
+                                onClick={() => setPreviewOrderIds(slotFilteredSubOrders.filter(o => normalizeStatus(o.status) === "preparing").map(o => o.id))}
+                                className="text-[9px] uppercase font-black tracking-widest text-white bg-sky-600 hover:bg-sky-700 rounded px-1.5 py-0.5 transition-colors flex items-center justify-center gap-1 shadow-sm"
+                              >
+                                <Printer className="w-2.5 h-2.5" /> Print All
+                              </button>
+                            )}
+                          </div>
                         )}
                       </div>
                     );
@@ -1122,8 +1136,7 @@ export function KitchenPage({ user, onBack, showToast }: { user: AppUser | null,
               ) : (
                 <div className="flex flex-col gap-4">
                   {filteredSubOrders.map(o => {
-                    const st = o.status || "New";
-                    const impliedSubTab = st === "Out for delivery" ? "out_for_delivery" : st.toLowerCase();
+                    const impliedSubTab = normalizeStatus(o.status) as any;
                     return renderOrderRow(o, impliedSubTab);
                   })}
                 </div>
@@ -1342,13 +1355,7 @@ export function KitchenPage({ user, onBack, showToast }: { user: AppUser | null,
                       { key: "cancelled" as const,        label: "Cancelled",        color: "border-rose-500 text-rose-700"      },
                     ]).map(({ key, label, color }) => {
                       const count = visiblePickupOrders.filter(o => {
-                        const st = o.status || "New";
-                        if (key === "new") return !o.status || st === "New";
-                        if (key === "preparing") return st === "Preparing";
-                        if (key === "ready") return st === "Ready";
-                        if (key === "delivered") return st === "Delivered";
-                        if (key === "cancelled") return st === "Cancelled";
-                        return false;
+                        return normalizeStatus(o.status) === key;
                       }).length;
                       return (
                         <button
@@ -1367,13 +1374,7 @@ export function KitchenPage({ user, onBack, showToast }: { user: AppUser | null,
                   <div className="flex flex-col gap-4">
                     {(() => {
                       const filtered = visiblePickupOrders.filter(o => {
-                        const st = o.status || "New";
-                        if (pickupSubTab === "new") return !o.status || st === "New";
-                        if (pickupSubTab === "preparing") return st === "Preparing";
-                        if (pickupSubTab === "ready") return st === "Ready";
-                        if (pickupSubTab === "delivered") return st === "Delivered";
-                        if (pickupSubTab === "cancelled") return st === "Cancelled";
-                        return false;
+                        return normalizeStatus(o.status) === pickupSubTab;
                       });
                       if (filtered.length === 0) return (
                         <div className="py-12 text-center text-slate-400 font-medium italic bg-white rounded-xl border border-dashed border-slate-200">No orders in this status.</div>
@@ -1469,7 +1470,7 @@ export function KitchenPage({ user, onBack, showToast }: { user: AppUser | null,
                      onClick={() => setKitchenSubTab("new")}
                      className={cn("whitespace-nowrap pb-1 font-bold text-sm transition-all border-b-[3px]", kitchenSubTab === "new" ? "border-amber-500 text-amber-700" : "border-transparent text-slate-500 hover:text-slate-700")}
                    >
-                     New ({visibleOrders.filter((o: OrderReceipt) => (!o.status || o.status === "New") && !o.customer.isPickup).length})
+                     New ({visibleOrders.filter((o: OrderReceipt) => normalizeStatus(o.status) === "new" && !o.customer.isPickup).length})
                    </button>
                    {kitchenSubTab === "new" && (
                      <label className="flex items-center justify-center gap-1.5 text-[10px] uppercase font-black tracking-widest text-amber-600 pb-2 cursor-pointer bg-amber-50 px-2 rounded-md">
@@ -1484,9 +1485,9 @@ export function KitchenPage({ user, onBack, showToast }: { user: AppUser | null,
                       onClick={() => setKitchenSubTab("preparing")}
                       className={cn("whitespace-nowrap pb-1 font-bold text-sm transition-all border-b-[3px]", kitchenSubTab === "preparing" ? "border-sky-500 text-sky-700" : "border-transparent text-slate-500 hover:text-slate-700")}
                     >
-                      Preparing ({visibleOrders.filter((o: OrderReceipt) => o.status === "Preparing").length})
+                      Preparing ({visibleOrders.filter((o: OrderReceipt) => normalizeStatus(o.status) === "preparing").length})
                     </button>
-                    {kitchenSubTab === "preparing" && visibleOrders.filter((o: OrderReceipt) => o.status === "Preparing").length > 0 && (
+                    {kitchenSubTab === "preparing" && visibleOrders.filter((o: OrderReceipt) => normalizeStatus(o.status) === "preparing").length > 0 && (
                       <button 
                         onClick={() => setPreviewOrderIds(visibleOrders.filter((o: OrderReceipt) => o.status === "Preparing").map(o => o.id))}
                         className="text-[10px] uppercase font-black tracking-widest text-white bg-sky-600 hover:bg-sky-700 rounded px-2 py-1 pb-1 mb-1 transition-colors flex items-center justify-center gap-1 shadow-sm"
@@ -1502,12 +1503,12 @@ export function KitchenPage({ user, onBack, showToast }: { user: AppUser | null,
                       onClick={() => setKitchenSubTab("ready")}
                       className={cn("whitespace-nowrap pb-1 font-bold text-sm transition-all border-b-[3px]", kitchenSubTab === "ready" ? "border-emerald-500 text-emerald-700" : "border-transparent text-slate-500 hover:text-slate-700")}
                     >
-                      Ready ({visibleOrders.filter((o: OrderReceipt) => o.status === "Ready").length})
+                      Ready ({visibleOrders.filter((o: OrderReceipt) => normalizeStatus(o.status) === "ready").length})
                     </button>
-                    {kitchenSubTab === "ready" && visibleOrders.filter((o: OrderReceipt) => o.status === "Ready").length > 0 && (
+                    {kitchenSubTab === "ready" && visibleOrders.filter((o: OrderReceipt) => normalizeStatus(o.status) === "ready").length > 0 && (
                       <button 
                         onClick={async () => {
-                          const readyOrders = visibleOrders.filter((o: OrderReceipt) => o.status === "Ready");
+                          const readyOrders = visibleOrders.filter((o: OrderReceipt) => normalizeStatus(o.status) === "ready");
                           const activeBoys = deliveryBoys.filter((b: any) => b.is_active);
                           if (activeBoys.length === 0) { showToast("⚠️ No active delivery partners!"); return; }
                           
@@ -1542,59 +1543,59 @@ export function KitchenPage({ user, onBack, showToast }: { user: AppUser | null,
                    onClick={() => setKitchenSubTab("out_for_delivery")}
                    className={cn("whitespace-nowrap pb-3 font-bold text-sm transition-all border-b-[3px] shrink-0", kitchenSubTab === "out_for_delivery" ? "border-purple-500 text-purple-700" : "border-transparent text-slate-500 hover:text-slate-700")}
                  >
-                   Out for Delivery ({visibleOrders.filter((o: OrderReceipt) => o.status === "Out for delivery").length})
+                   Out for Delivery ({visibleOrders.filter((o: OrderReceipt) => normalizeStatus(o.status) === "out_for_delivery").length})
                  </button>
                  <button 
                    onClick={() => setKitchenSubTab("delivered")}
                    className={cn("whitespace-nowrap pb-3 font-bold text-sm transition-all border-b-[3px] shrink-0", kitchenSubTab === "delivered" ? "border-slate-800 text-slate-800" : "border-transparent text-slate-500 hover:text-slate-700")}
                  >
-                   Delivered ({visibleOrders.filter((o: OrderReceipt) => o.status === "Delivered").length})
+                   Delivered ({visibleOrders.filter((o: OrderReceipt) => normalizeStatus(o.status) === "delivered").length})
                  </button>
                  <button 
                    onClick={() => setKitchenSubTab("cancelled")}
                    className={cn("whitespace-nowrap pb-3 font-bold text-sm transition-all border-b-[3px] shrink-0", kitchenSubTab === "cancelled" ? "border-rose-500 text-rose-700" : "border-transparent text-slate-500 hover:text-slate-700")}
                  >
-                   Cancelled ({visibleOrders.filter((o: OrderReceipt) => o.status === "Cancelled").length})
+                   Cancelled ({visibleOrders.filter((o: OrderReceipt) => normalizeStatus(o.status) === "cancelled").length})
                  </button>
                </div>
 
                {/* Render Area based on selected tab */}
                <div className="flex flex-col gap-4">
                  {kitchenSubTab === "new" && (
-                   visibleOrders.filter((o: OrderReceipt) => (!o.status || o.status === "New") && !o.customer.isPickup).length === 0 ? (
+                   visibleOrders.filter((o: OrderReceipt) => normalizeStatus(o.status) === "new" && !o.customer.isPickup).length === 0 ? (
                      <div className="py-12 text-center text-slate-400 font-medium italic bg-white rounded-xl border border-dashed border-slate-200">No new orders waiting.</div>
-                   ) : visibleOrders.filter((o: OrderReceipt) => (!o.status || o.status === "New") && !o.customer.isPickup).map(o => renderOrderRow(o))
+                   ) : visibleOrders.filter((o: OrderReceipt) => normalizeStatus(o.status) === "new" && !o.customer.isPickup).map(o => renderOrderRow(o))
                  )}
 
                  {kitchenSubTab === "preparing" && (
-                   visibleOrders.filter((o: OrderReceipt) => o.status === "Preparing" && !o.customer.isPickup).length === 0 ? (
+                   visibleOrders.filter((o: OrderReceipt) => normalizeStatus(o.status) === "preparing" && !o.customer.isPickup).length === 0 ? (
                      <div className="py-12 text-center text-slate-400 font-medium italic bg-white rounded-xl border border-dashed border-slate-200">No orders currently in preparation.</div>
-                   ) : visibleOrders.filter((o: OrderReceipt) => o.status === "Preparing" && !o.customer.isPickup).map(o => renderOrderRow(o))
+                   ) : visibleOrders.filter((o: OrderReceipt) => normalizeStatus(o.status) === "preparing" && !o.customer.isPickup).map(o => renderOrderRow(o))
                  )}
 
                  {kitchenSubTab === "ready" && (
-                   visibleOrders.filter((o: OrderReceipt) => o.status === "Ready" && !o.customer.isPickup).length === 0 ? (
+                   visibleOrders.filter((o: OrderReceipt) => normalizeStatus(o.status) === "ready" && !o.customer.isPickup).length === 0 ? (
                      <div className="py-12 text-center text-slate-400 font-medium italic bg-white rounded-xl border border-dashed border-slate-200">No orders currently ready.</div>
-                   ) : visibleOrders.filter((o: OrderReceipt) => o.status === "Ready" && !o.customer.isPickup).map(o => renderOrderRow(o))
+                   ) : visibleOrders.filter((o: OrderReceipt) => normalizeStatus(o.status) === "ready" && !o.customer.isPickup).map(o => renderOrderRow(o))
                  )}
 
 
                  {kitchenSubTab === "out_for_delivery" && (
-                   visibleOrders.filter((o: OrderReceipt) => o.status === "Out for delivery").length === 0 ? (
+                   visibleOrders.filter((o: OrderReceipt) => normalizeStatus(o.status) === "out_for_delivery").length === 0 ? (
                      <div className="py-12 text-center text-slate-400 font-medium italic bg-white rounded-xl border border-dashed border-slate-200">No orders currently out for delivery.</div>
-                   ) : visibleOrders.filter((o: OrderReceipt) => o.status === "Out for delivery").map(o => renderOrderRow(o))
+                   ) : visibleOrders.filter((o: OrderReceipt) => normalizeStatus(o.status) === "out_for_delivery").map(o => renderOrderRow(o))
                  )}
 
                  {kitchenSubTab === "delivered" && (
-                   visibleOrders.filter((o: OrderReceipt) => o.status === "Delivered").length === 0 ? (
+                   visibleOrders.filter((o: OrderReceipt) => normalizeStatus(o.status) === "delivered").length === 0 ? (
                      <div className="py-12 text-center text-slate-400 font-medium italic bg-white rounded-xl border border-dashed border-slate-200">No delivered orders in the current view. (Check your filters above)</div>
-                   ) : visibleOrders.filter((o: OrderReceipt) => o.status === "Delivered").map(o => renderOrderRow(o))
+                   ) : visibleOrders.filter((o: OrderReceipt) => normalizeStatus(o.status) === "delivered").map(o => renderOrderRow(o))
                  )}
 
                  {kitchenSubTab === "cancelled" && (
-                   visibleOrders.filter((o: OrderReceipt) => o.status === "Cancelled").length === 0 ? (
+                   visibleOrders.filter((o: OrderReceipt) => normalizeStatus(o.status) === "cancelled").length === 0 ? (
                      <div className="py-12 text-center text-slate-400 font-medium italic bg-white rounded-xl border border-dashed border-slate-200">No cancelled orders.</div>
-                   ) : visibleOrders.filter((o: OrderReceipt) => o.status === "Cancelled").map(o => renderOrderRow(o))
+                   ) : visibleOrders.filter((o: OrderReceipt) => normalizeStatus(o.status) === "cancelled").map(o => renderOrderRow(o))
                  )}
                </div>
             </div>

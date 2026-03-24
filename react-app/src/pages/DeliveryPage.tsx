@@ -8,6 +8,13 @@ import { Button } from "../components/ui/Button";
 import { cn } from "../lib/utils";
 import { formatTimeIndia } from "../lib/format";
 
+const safeParse = (val: any) => {
+  if (typeof val === 'string') {
+    try { return JSON.parse(val); } catch (e) { return val; }
+  }
+  return val;
+};
+
 export function DeliveryPage({ user, onBack, showToast }: { user: AppUser | null, onBack: () => void, showToast: (msg: string) => void }) {
   const supportPhoneRes = useAppSettingString("support_phone", "08500929080");
 
@@ -121,8 +128,9 @@ export function DeliveryPage({ user, onBack, showToast }: { user: AppUser | null
     if (newStatus === 'picked_up') {
       const assignment = assignments.find(a => a.id === assignmentId);
       if (assignment?.order_id) {
-        const { data: order } = await supabase.from('orders').select('meta').eq('id', assignment.order_id).single();
-        const currentMeta = order?.meta || {};
+        const rawId = assignment.order_id.replace('-today', '');
+        const { data: order } = await supabase.from('orders').select('meta').eq('id', rawId).single();
+        const currentMeta = safeParse(order?.meta) || {};
         
         // Only generate OTP if one doesn't already exist
         const generatedOtp = currentMeta.delivery_otp || Math.floor(1000 + Math.random() * 9000).toString();
@@ -131,7 +139,7 @@ export function DeliveryPage({ user, onBack, showToast }: { user: AppUser | null
         await supabase.from('orders').update({ 
           meta: { ...currentMeta, ...metaUpdate },
           status: 'out_for_delivery'
-        }).eq('id', assignment.order_id);
+        }).eq('id', rawId);
       }
       showToast(`✅ Order marked as Picked Up.`);
     }
@@ -217,17 +225,38 @@ export function DeliveryPage({ user, onBack, showToast }: { user: AppUser | null
     }
     setIsVerifying(true);
 
-    const orderId = verifyingAssignment.order_id;
-    const { data: order } = await supabase.from('orders').select('meta').eq('id', orderId).single();
+    // 1. Aggressively use pre-fetched data (which we know exists because it's in the list)
+    const joinedOrder = Array.isArray(verifyingAssignment.orders) ? verifyingAssignment.orders[0] : verifyingAssignment.orders;
     
-    const correctOtp = order?.meta?.delivery_otp;
+    // 2. ONLY re-fetch from DB if joinedOrder is missing for some reason
+    let order = joinedOrder;
+    if (!order) {
+      const { data: freshA } = await supabase
+        .from('delivery_assignments')
+        .select('order_id, orders ( id, meta )')
+        .eq('id', verifyingAssignment.id)
+        .maybeSingle();
+      order = Array.isArray(freshA?.orders) ? freshA.orders[0] : freshA?.orders;
+    }
+
+    if (!order) {
+      showToast(`❌ System Error: Order record not found (AID: ${verifyingAssignment.id}, OID: ${verifyingAssignment.order_id}).`);
+      setIsVerifying(false);
+      return;
+    }
     
-    if (otpValue === correctOtp) {
+    const resOrderId = order.id || verifyingAssignment.order_id;
+    // Use safeParse to handle cases where meta might be returned as a JSON string
+    const meta = safeParse(order.meta);
+    const correctOtp = String(meta?.delivery_otp || "").trim();
+    const enteredOtp = String(otpValue || "").trim();
+    
+    if (enteredOtp === correctOtp && correctOtp !== "") {
       // 1. Upload Base64 to Storage
       // Convert base64 back to blob for storage
       const res = await fetch(proofImage);
       const blob = await res.blob();
-      const path = `proofs/${orderId}_${Date.now()}.jpg`;
+      const path = `proofs/${resOrderId}_${Date.now()}.jpg`;
       
       const { error: upErr } = await supabase.storage.from('delivery-proofs').upload(path, blob, { upsert: true });
       
@@ -249,7 +278,7 @@ export function DeliveryPage({ user, onBack, showToast }: { user: AppUser | null
       await supabase.from('orders').update({ 
         status: 'delivered', 
         meta: newMeta 
-      }).eq('id', orderId);
+      }).eq('id', resOrderId);
 
       const ok = await updateStatusCore(verifyingAssignment.id, 'delivered');
       if (ok) {
@@ -257,7 +286,11 @@ export function DeliveryPage({ user, onBack, showToast }: { user: AppUser | null
         showToast("✅ Delivery successful!");
       }
     } else {
-      showToast("❌ Incorrect PIN. Please try again.");
+      if (!correctOtp) {
+         showToast("❌ PIN mismatch: No PIN found for this order. Try re-opening the task.");
+      } else {
+         showToast("❌ Incorrect PIN. Please try again.");
+      }
     }
     setIsVerifying(false);
   }

@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.177.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.7.1";
-import { SmtpClient } from "https://deno.land/x/smtp@v0.7.0/mod.ts";
+// SmtpClient is imported dynamically inside handleWelcomeEmail to prevent boot crashes
 
 /** 
  * UNIFIED API ROUTER (v1) - DASHBOARD COMPATIBLE
@@ -164,6 +164,7 @@ async function handleWelcomeEmail(req: Request, headers: any) {
   const SMTP_PASSWORD = Deno.env.get("SMTP_PASSWORD");
 
   if (SMTP_USERNAME && SMTP_PASSWORD) {
+    const { SmtpClient } = await import("https://deno.land/x/smtp@v0.7.0/mod.ts");
     const client = new SmtpClient();
     await client.connectTLS({ hostname: Deno.env.get("SMTP_HOST") || "smtp.hostinger.com", port: parseInt(Deno.env.get("SMTP_PORT") || "465"), username: SMTP_USERNAME, password: SMTP_PASSWORD });
     await client.send({

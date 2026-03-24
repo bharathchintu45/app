@@ -191,13 +191,24 @@ export default function SettingsTab({ showToast, fetchOrders }: SettingsTabProps
 
       const { data, error } = await api.v1.generateDailyOrders(targetStr);
       
-      if (error) throw error;
+      if (error) {
+        // Try to extract body from FunctionsHttpError for debugging
+        let detail = error.message || 'Unknown edge function error';
+        try {
+          if (error.context && typeof error.context.json === 'function') {
+            const body = await error.context.json();
+            detail = JSON.stringify(body);
+          }
+        } catch (_) { /* ignore parse errors */ }
+        throw new Error(detail);
+      }
       if (data && data.error) throw new Error(`Backend Error: ${data.error} | Stack: ${data.stack}`);
       
       setRunNowResult({ success: true, message: `Orders generated for ${targetStr}`, created: data.created, skipped: 0 });
       showToast(`✅ Done: ${data.created} order(s) created`);
       if (fetchOrders) await fetchOrders();
     } catch (err: any) {
+      console.error('[RunNow] Full error:', err);
       setRunNowResult({ success: false, message: err.message || 'Unknown error', created: 0, skipped: 0 });
       showToast('❌ Error: ' + (err.message || 'Unknown error'));
     } finally {

@@ -284,11 +284,22 @@ export default function App() {
 
           const newHoldsMap: HoldsMap = {};
           (holdsRes.data || []).forEach((h: any) => {
-            newHoldsMap[h.hold_date] = { day: h.is_full_day, slots: h.slots || {} };
+            // Find a swap that was originally from this date to show "Rescheduled to..."
+            const matchingSwap = (swapsRes.data || []).find((s: any) => s.original_date === h.hold_date);
+            newHoldsMap[h.hold_date] = { 
+              day: h.is_full_day, 
+              slots: h.slots || {},
+              rescheduledTo: matchingSwap?.date
+            };
           });
 
           setPlanMap(newPlanMap);
           setHolds(newHoldsMap);
+        } else {
+          // Explicitly clear state if no active subscription found in DB
+          setActiveSubscription(null);
+          setPlanMap({});
+          setHolds({});
         }
 
         // Process Today's Order

@@ -74,6 +74,7 @@ export interface Macros {
 export interface DayHold {
   day: boolean;
   slots: Record<Slot, boolean>;
+  rescheduledTo?: string;
 }
 
 export type HoldsMap = Record<string, DayHold>;
