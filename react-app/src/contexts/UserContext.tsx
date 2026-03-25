@@ -73,11 +73,20 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
+    if (user) {
+      localStorage.setItem("tfb_user", JSON.stringify(user));
+    } else {
+      localStorage.removeItem("tfb_user");
+    }
+  }, [user]);
+
+  useEffect(() => {
     // Initial Session
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session?.user) {
         fetchUserProfile(session.user.id, session.user.email || "");
       } else {
+        localStorage.removeItem("tfb_user");
         setLoading(false);
       }
     });
@@ -88,7 +97,6 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
         fetchUserProfile(session.user.id, session.user.email || "");
       } else if (event === "SIGNED_OUT") {
         setUser(null);
-        localStorage.removeItem("tfb_user");
         setLoading(false);
       }
     });

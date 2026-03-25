@@ -11,6 +11,7 @@ import { Input } from "../ui/Input";
 import { SectionTitle } from "../ui/Typography";
 import { useAppSetting, useAppSettingNumber, useAppSettingString } from "../../hooks/useAppSettings";
 import { api } from "../../lib/api";
+import { ManualOrderTrigger } from "./ManualOrderTrigger";
 
 interface SettingsTabProps {
   showToast: (msg: string) => void;
@@ -59,8 +60,6 @@ export default function SettingsTab({ showToast, fetchOrders }: SettingsTabProps
 
   const [draftSettings, setDraftSettings] = useState<any>(null);
   const [isSavingSettings, setIsSavingSettings] = useState(false);
-  const [runNowLoading, setRunNowLoading] = useState(false);
-  const [runNowResult, setRunNowResult] = useState<{ success: boolean; message: string; created: number; skipped: number } | null>(null);
 
   useEffect(() => {
     const allLoaded = [
@@ -181,40 +180,6 @@ export default function SettingsTab({ showToast, fetchOrders }: SettingsTabProps
     }
   }
 
-  async function handleRunNow() {
-    setRunNowLoading(true);
-    setRunNowResult(null);
-    try {
-      const now = new Date();
-      const ist = new Date(now.getTime() + (5 * 60 + 30) * 60 * 1000);
-      const targetStr = ist.toISOString().slice(0, 10);
-
-      const { data, error } = await api.v1.generateDailyOrders(targetStr);
-      
-      if (error) {
-        // Try to extract body from FunctionsHttpError for debugging
-        let detail = error.message || 'Unknown edge function error';
-        try {
-          if ((error as any).context && typeof (error as any).context.json === 'function') {
-            const body = await (error as any).context.json();
-            detail = JSON.stringify(body);
-          }
-        } catch (_) { /* ignore parse errors */ }
-        throw new Error(detail);
-      }
-      if (data && data.error) throw new Error(`Backend Error: ${data.error} | Stack: ${data.stack}`);
-      
-      setRunNowResult({ success: true, message: `Orders generated for ${targetStr}`, created: data.created, skipped: 0 });
-      showToast(`✅ Done: ${data.created} order(s) created`);
-      if (fetchOrders) await fetchOrders();
-    } catch (err: any) {
-      console.error('[RunNow] Full error:', err);
-      setRunNowResult({ success: false, message: err.message || 'Unknown error', created: 0, skipped: 0 });
-      showToast('❌ Error: ' + (err.message || 'Unknown error'));
-    } finally {
-      setRunNowLoading(false);
-    }
-  }
 
   return (
     <motion.div initial={{ opacity: 0, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 1.02 }} className="space-y-8">
@@ -721,66 +686,44 @@ export default function SettingsTab({ showToast, fetchOrders }: SettingsTabProps
             )}
           </div>
 
-          {/* ── Auto Order Scheduler Card ── */}
-          <div className="bg-indigo-50 border border-indigo-200 rounded-2xl p-6 col-span-full">
-            <div className="flex flex-col md:flex-row md:items-start justify-between gap-4">
+          {/* ── Auto Order Engine ── */}
+          <div className="bg-indigo-50/50 border border-indigo-200 rounded-2xl p-6 col-span-full">
+            <div className="flex flex-col md:flex-row md:items-start justify-between gap-6">
               <div className="flex-1">
                 <div className="flex items-center gap-2 mb-1">
-                  <h3 className="font-bold text-indigo-900">Auto Subscription Order Generator</h3>
+                  <h3 className="font-bold text-indigo-900">Scheduled Order Engine</h3>
                   <span className={`text-[10px] px-2 py-0.5 rounded-full font-black uppercase ${draftSettings?.autoOrderEnabled ? 'bg-indigo-600 text-white' : 'bg-slate-200 text-slate-500'}`}>
-                    {draftSettings?.autoOrderEnabled ? 'ENABLED' : 'DISABLED'}
+                    {draftSettings?.autoOrderEnabled ? 'ACTIVE' : 'OFF'}
                   </span>
                 </div>
-                <p className="text-sm text-indigo-700 mt-1">
-                  Automatically creates today's delivery orders for all active subscriptions at the scheduled time (IST).
-                  Runs via Supabase cron — no browser needed. Duplicate-safe: already-generated orders are skipped.
+                <p className="text-sm text-indigo-700/70 mt-1">
+                  The system will automatically generate orders for all active subscriptions at the time specified below.
                 </p>
-                <div className="mt-4 flex flex-wrap items-center gap-4">
-                  <div className="flex flex-col gap-1">
-                    <label className="text-[10px] font-black uppercase tracking-widest text-indigo-500">Daily Run Time (IST)</label>
+                <div className="mt-4 flex flex-wrap items-center gap-6">
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-[10px] font-black uppercase tracking-widest text-indigo-500/60">Daily Run Time (IST)</label>
                     <input
                       type="time"
                       value={draftSettings?.autoOrderTime ?? "05:00"}
                       onChange={e => setDraftSettings((d: any) => d ? { ...d, autoOrderTime: e.target.value } : null)}
-                      className="h-10 px-4 rounded-xl border border-indigo-200 bg-white font-bold text-slate-800 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                      className="h-10 px-4 rounded-xl border border-indigo-200 bg-white font-bold text-slate-800 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 w-32"
                     />
                   </div>
-                  <div className="flex flex-col gap-1">
-                    <label className="text-[10px] font-black uppercase tracking-widest text-indigo-500">Schedule</label>
-                    <div className="flex items-center gap-2 h-10 px-4 rounded-xl bg-white border border-indigo-100 text-sm font-medium text-slate-700">
-                      {draftSettings?.autoOrderEnabled
-                        ? <><span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse inline-block" /> Daily at {draftSettings.autoOrderTime} IST</>
-                        : <><span className="w-2 h-2 rounded-full bg-slate-300 inline-block" /> Schedule disabled</>
-                      }
-                    </div>
+                  <div className="flex items-center gap-3 self-end h-10">
+                    <span className="text-xs font-bold text-indigo-700">Automation</span>
+                    <button
+                      onClick={() => setDraftSettings((d: any) => d ? { ...d, autoOrderEnabled: !d.autoOrderEnabled } : null)}
+                      className={`relative inline-flex h-7 w-12 shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${draftSettings?.autoOrderEnabled ? 'bg-indigo-600' : 'bg-slate-300'}`}
+                    >
+                      <span className={`pointer-events-none inline-block h-6 w-6 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${draftSettings?.autoOrderEnabled ? 'translate-x-5' : 'translate-x-0'}`} />
+                    </button>
                   </div>
                 </div>
-                {runNowResult && (
-                  <div className={`mt-3 px-4 py-2.5 rounded-xl text-sm font-medium flex items-center gap-2.5 ${runNowResult.success ? 'bg-emerald-50 border border-emerald-200 text-emerald-800' : 'bg-rose-50 border border-rose-200 text-rose-800'}`}>
-                    {runNowResult.success ? '✅' : '❌'}
-                    <span>{runNowResult.message}</span>
-                    {runNowResult.success && <><span className="ml-2 bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full text-xs font-black">{runNowResult.created} created</span><span className="bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full text-xs font-black">{runNowResult.skipped} skipped</span></>}
-                  </div>
-                )}
               </div>
-              <div className="flex flex-col items-end gap-3 shrink-0">
-                <div className="flex items-center gap-3">
-                  <span className="text-sm font-bold text-indigo-700">Enable</span>
-                  <button
-                    onClick={() => setDraftSettings((d: any) => d ? { ...d, autoOrderEnabled: !d.autoOrderEnabled } : null)}
-                    className={`relative inline-flex h-7 w-12 shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${draftSettings?.autoOrderEnabled ? 'bg-indigo-600' : 'bg-slate-300'}`}
-                  >
-                    <span className={`pointer-events-none inline-block h-6 w-6 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${draftSettings?.autoOrderEnabled ? 'translate-x-5' : 'translate-x-0'}`} />
-                  </button>
-                </div>
-                <button
-                  onClick={handleRunNow}
-                  disabled={runNowLoading}
-                  className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white font-bold text-sm px-5 py-2.5 rounded-xl transition-all shadow-sm shadow-indigo-200"
-                >
-                  {runNowLoading ? <><RefreshCw size={14} className="animate-spin" /> Running…</> : <><Play size={14} /> Run Now</>}
-                </button>
-              </div>
+            </div>
+            
+            <div className="mt-8 pt-8 border-t border-indigo-100">
+              <ManualOrderTrigger showToast={showToast} />
             </div>
           </div>
 

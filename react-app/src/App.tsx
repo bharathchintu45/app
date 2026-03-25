@@ -1,13 +1,15 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import type { Route, AuthIntent, DashboardTab, GroupCart, GroupOrderDraft, HoldsMap, OrderReceipt, PlanMap, StartDateMap, TargetMap, ThreadMsg, Slot, MenuItem } from "./types";
-import { subscriptionId, runDevTests } from "./data/menu";
+import type { Route, AuthIntent, DashboardTab, OrderReceipt, ThreadMsg, Slot, MenuItem, PlanMap, HoldsMap, GroupCart, GroupOrderDraft, StartDateMap, TargetMap, AppUser } from "./types";
+import { runDevTests } from "./data/menu";
 import { getMenu } from "./hooks/useMenu";
 import { supabase } from "./lib/supabase";
 import { dayKey, addDays, parseDateKeyToDate, getTodayIndia } from "./lib/format";
 import { useOrderNotifications } from "./hooks/useOrderNotifications";
 import { useAppSetting, useAppSettingString } from "./hooks/useAppSettings";
 import { useUser } from "./contexts/UserContext";
+import { useCart } from "./contexts/CartContext";
+import { usePlan } from "./contexts/PlanContext";
 
 // Layout
 import { TopNav } from "./components/layout/TopNav";
@@ -78,53 +80,28 @@ import { AuthModal } from "./components/auth/AuthModal";
 
 export default function App() {
   const { user, setUser } = useUser();
+  const { regularCart, groupCart } = useCart();
+  const { setHolds, setPlanMap, setDateSlotAddons, clearPlanningState } = usePlan();
+
+  const validRoutes: Route[] = useMemo(() => ["home", "login", "checkout-regular", "checkout-personal", "checkout-group", "order-confirmation", "app", "dashboard", "admin", "manager", "kitchen", "delivery", "profile", "orders", "404", "about", "contact", "privacy", "terms", "refunds", "shipping"], []);
+
   const [route, setRoute] = useState<Route>(() => {
     const hash = window.location.hash.replace('#', '');
-    const validRoutes: Route[] = ["home", "login", "checkout-regular", "checkout-personal", "checkout-group", "order-confirmation", "app", "dashboard", "admin", "manager", "kitchen", "delivery", "profile", "orders", "404", "about", "contact", "privacy", "terms", "refunds", "shipping"];
     if (hash && !validRoutes.includes(hash as Route)) return "404";
     return (hash as Route) || "home";
   });
+
+  // Keep a ref for the current route so callbacks don't have stale closures
+  const routeRef = useRef(route);
+  useEffect(() => { routeRef.current = route; }, [route]);
   const [authOpen, setAuthOpen] = useState(false);
   const [authIntent, setAuthIntent] = useState<AuthIntent>("none");
   const [dashboardTab, setDashboardTab] = useState<DashboardTab>("personal");
-  const [subscription, setSubscription] = useState(() => {
-    const saved = localStorage.getItem("tfb_subscription");
-    return saved || subscriptionId("complete", 7);
-  });
-  const [regularCart, setRegularCart] = useState<Record<string, number>>(() => {
-    const saved = localStorage.getItem("tfb_regular_cart");
-    return saved ? JSON.parse(saved) : {};
-  });
-  const [holds, setHolds] = useState<HoldsMap>(() => {
-    const saved = localStorage.getItem("tfb_holds");
-    return saved ? JSON.parse(saved) : {};
-  });
-  const [planMap, setPlanMap] = useState<PlanMap>(() => {
-    const saved = localStorage.getItem("tfb_plan_map");
-    return saved ? JSON.parse(saved) : {};
-  });
-  
   // Real DB state for Chef's Inbox
   const [chefThreads, setChefThreads] = useState<ThreadMsg[]>([]);
   const [unreadChefMessages, setUnreadChefMessages] = useState(0);
 
-  const [groupCart, setGroupCart] = useState<GroupCart>(() => {
-    const saved = localStorage.getItem("tfb_group_cart");
-    return saved ? JSON.parse(saved) : {};
-  });
-  const [groupDraft, setGroupDraft] = useState<GroupOrderDraft>(() => {
-    const saved = localStorage.getItem("tfb_group_draft");
-    return saved ? JSON.parse(saved) : { people: 10, deliveryAt: "", notes: "" };
-  });
   const [lastOrder, setLastOrder] = useState<OrderReceipt | null>(null);
-  const [startDates, setStartDates] = useState<StartDateMap>(() => {
-    const saved = localStorage.getItem("tfb_start_dates");
-    return saved ? JSON.parse(saved) : {};
-  });
-  const [targetMap, setTargetMap] = useState<TargetMap>(() => {
-    const saved = localStorage.getItem("tfb_target_map");
-    return saved ? JSON.parse(saved) : {};
-  });
   const [activeSubscription, setActiveSubscription] = useState<any>(() => {
     const saved = localStorage.getItem("tfb_active_subscription");
     return saved ? JSON.parse(saved) : null;
@@ -136,21 +113,22 @@ export default function App() {
   // Global Toast State
   const [toastMsg, setToastMsg] = useState("");
 
-  // Helper to log route changes - memoized to prevent re-render loops in children
+  // Helper to log route changes - stable reference using refs
   const changeRoute = useCallback((newRoute: Route) => {
-    // Basic validation
-    const validRoutes: Route[] = ["home", "login", "checkout-regular", "checkout-personal", "checkout-group", "order-confirmation", "app", "dashboard", "admin", "manager", "kitchen", "delivery", "profile", "orders", "404", "about", "contact", "privacy", "terms", "refunds", "shipping"];
     if (!validRoutes.includes(newRoute)) {
       console.warn(`[App] Invalid route requested: ${newRoute}. Redirecting to 404.`);
+      window.history.pushState("404", "", `#404`);
       setRoute("404");
       return;
     }
 
-    if (newRoute === route) return;
+    if (newRoute === routeRef.current) return;
     
-    console.log(`[App] Navigating: ${route} -> ${newRoute}`);
+    console.log(`[App] Navigating: ${routeRef.current} -> ${newRoute}`);
+    // Push new entry to history stack (forward navigation)
+    window.history.pushState(newRoute, "", `#${newRoute}`);
     setRoute(newRoute);
-  }, [route]);
+  }, [validRoutes]);
 
   const { value: isMaintenance } = useAppSetting("maintenance_mode", false);
   const { value: bypassEmailsStr } = useAppSettingString("maintenance_bypass_emails", "info@thefreshbox.in, admin@thefreshbox.in");
@@ -194,34 +172,45 @@ export default function App() {
     };
   }, []);
 
-  // Handle browser back button and scroll-to-top on navigation
+  // Scroll to top on route change
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: "instant" });
-    if (window.history.state !== route) {
-      window.history.pushState(route, "", `#${route}`);
-    }
   }, [route]);
 
+  // Set initial history entry (replaceState, not pushState, to avoid extra entry)
+  useEffect(() => {
+    window.history.replaceState(route, "", `#${route}`);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Handle browser back/forward button
   useEffect(() => {
     const handlePopState = (e: PopStateEvent) => {
-      if (e.state) {
-        changeRoute(e.state as Route);
+      // Only treat e.state as a route if it's a string (route name).
+      // Cart drawers push non-string states like { cartOpen: true } — ignore those.
+      if (typeof e.state === "string" && validRoutes.includes(e.state as Route)) {
+        console.log(`[App] Back/Forward: -> ${e.state}`);
+        // Set route directly — do NOT call changeRoute (which would pushState again)
+        setRoute(e.state as Route);
       } else {
+        // Fallback: read from URL hash
         const hash = window.location.hash.replace('#', '');
-        changeRoute((hash as Route) || "home");
+        if (hash && validRoutes.includes(hash as Route)) {
+          setRoute(hash as Route);
+        }
+        // If no valid hash and non-string state (cart drawer), do nothing
       }
     };
     window.addEventListener("popstate", handlePopState);
     return () => window.removeEventListener("popstate", handlePopState);
-  }, []);
+  }, [validRoutes]);
 
   // ✅ Centralized data fetcher for subscription/orders/messages
   useEffect(() => {
     if (!user) {
       setChefThreads([]);
       setActiveSubscription(null);
-      setPlanMap({});
-      setHolds({});
+      clearPlanningState();
       setTodayOrder(null);
       return;
     }
@@ -262,6 +251,7 @@ export default function App() {
           menuItems.forEach(m => menuMap.set(m.id, m));
 
           const newPlanMap: PlanMap = {};
+          const newAddonMap: Record<string, Record<string, Array<{ item: MenuItem; qty: number }>>> = {};
           const scheduleLines = subData.schedule || [];
           const baseDate = subData.start_date ? parseDateKeyToDate(subData.start_date) : null;
 
@@ -271,9 +261,19 @@ export default function App() {
             else if (typeof line.day === 'number' && baseDate) dKey = dayKey(addDays(baseDate, line.day - 1));
             else return;
 
-            if (!newPlanMap[dKey]) newPlanMap[dKey] = {};
-            const item = menuMap.get(line.itemId);
-            if (item) newPlanMap[dKey][line.slot as Slot] = item;
+            if (line.type === 'addon') {
+              // Build addon map: date -> slot -> AddonEntry[]
+              const item = menuMap.get(line.itemId);
+              if (!item) return;
+              if (!newAddonMap[dKey]) newAddonMap[dKey] = {};
+              if (!newAddonMap[dKey][line.slot]) newAddonMap[dKey][line.slot] = [];
+              newAddonMap[dKey][line.slot].push({ item, qty: line.qty || 1 });
+            } else {
+              // Regular meal line
+              if (!newPlanMap[dKey]) newPlanMap[dKey] = {};
+              const item = menuMap.get(line.itemId);
+              if (item) newPlanMap[dKey][line.slot as Slot] = item;
+            }
           });
 
           (swapsRes.data || []).forEach((s: any) => {
@@ -284,7 +284,6 @@ export default function App() {
 
           const newHoldsMap: HoldsMap = {};
           (holdsRes.data || []).forEach((h: any) => {
-            // Find a swap that was originally from this date to show "Rescheduled to..."
             const matchingSwap = (swapsRes.data || []).find((s: any) => s.original_date === h.hold_date);
             newHoldsMap[h.hold_date] = { 
               day: h.is_full_day, 
@@ -295,11 +294,13 @@ export default function App() {
 
           setPlanMap(newPlanMap);
           setHolds(newHoldsMap);
+          setDateSlotAddons(newAddonMap as any);
         } else {
           // Explicitly clear state if no active subscription found in DB
           setActiveSubscription(null);
           setPlanMap({});
           setHolds({});
+          setDateSlotAddons({});
         }
 
         // Process Today's Order
@@ -350,32 +351,14 @@ export default function App() {
     return () => { supabase.removeChannel(channel); };
   }, [user]);
 
-  // ✅ Optimized Centralized Storage Sync
+  // Sync active subscription to local storage
   useEffect(() => {
-    const syncMap = {
-      tfb_subscription: subscription,
-      tfb_regular_cart: JSON.stringify(regularCart),
-      tfb_holds: JSON.stringify(holds),
-      tfb_plan_map: JSON.stringify(planMap),
-      tfb_group_cart: JSON.stringify(groupCart),
-      tfb_group_draft: JSON.stringify(groupDraft),
-      tfb_start_dates: JSON.stringify(startDates),
-      tfb_target_map: JSON.stringify(targetMap),
-    };
-
-    Object.entries(syncMap).forEach(([key, value]) => {
-      localStorage.setItem(key, value);
-    });
-
     if (activeSubscription) {
       localStorage.setItem("tfb_active_subscription", JSON.stringify(activeSubscription));
     } else {
       localStorage.removeItem("tfb_active_subscription");
     }
-  }, [
-    subscription, regularCart, holds, planMap, 
-    groupCart, groupDraft, startDates, targetMap, activeSubscription
-  ]);
+  }, [activeSubscription]);
 
   const showToast = useCallback((msg: string) => {
     setToastMsg(msg);
@@ -387,8 +370,6 @@ export default function App() {
     if (route === "checkout-regular" && (!regularCart || Object.keys(regularCart).length === 0)) {
       showToast("Your regular order cart is empty.");
       changeRoute("home");
-    } else if (route === "checkout-personal") {
-      // Allow personalized checkout even with 0 initial meals as per user request
     } else if (route === "checkout-group") {
       const hasItems = Object.values(groupCart).some(qty => qty > 0);
       if (!hasItems) {
@@ -396,15 +377,9 @@ export default function App() {
         changeRoute("app");
       }
     }
-  }, [route, regularCart, planMap, groupCart, subscription, startDates, holds, showToast, changeRoute]);
+  }, [route, regularCart, groupCart, showToast, changeRoute]);
 
-  // Handle route-specific side effects
-  useEffect(() => {
-    window.scrollTo({ top: 0, behavior: "instant" });
-    if (window.history.state !== route) {
-      window.history.pushState(route, "", `#${route}`);
-    }
-  }, [route]);
+  // (History push is now handled inside changeRoute — no duplicate effect needed)
 
   // Realtime subscription updates — watches the dedicated subscriptions table
   useEffect(() => {
@@ -423,10 +398,7 @@ export default function App() {
       } else {
         setActiveSubscription((prev: any) => {
           if (prev) {
-            setPlanMap({});
-            setHolds({});
-            localStorage.removeItem("tfb_plan_map");
-            localStorage.removeItem("tfb_holds");
+            clearPlanningState();
           }
           return null;
         });
@@ -565,8 +537,6 @@ export default function App() {
             <TopNav
               route={route}
               setRoute={changeRoute}
-              user={user}
-              setUser={setUser}
               authOpen={authOpen}
               setAuthOpen={setAuthOpen}
               authIntent={authIntent}
@@ -597,40 +567,19 @@ export default function App() {
                     )
                   ) : route === "checkout-regular" ? (
                     <CheckoutRegularPage 
-                      user={user} 
-                      setUser={setUser} 
-                      regularCart={regularCart} 
-                      setRegularCart={setRegularCart} 
-                      setRoute={setRoute} 
+                      setRoute={changeRoute} 
                       setLastOrder={setLastOrder} 
                       showToast={showToast}
                     />
                   ) : route === "checkout-personal" ? (
                     <CheckoutPersonalPage 
-                      user={user} 
-                      setUser={setUser} 
-                      subscription={subscription} 
-                      planMap={planMap} 
-                      setPlanMap={setPlanMap}
-                      holds={holds} 
-                      setHolds={setHolds}
-                      setRoute={setRoute} 
+                      setRoute={changeRoute} 
                       setLastOrder={setLastOrder} 
-                      startDates={startDates} 
-                      setStartDates={setStartDates}
-                      targetMap={targetMap} 
-                      setTargetMap={setTargetMap}
                       showToast={showToast}
                     />
                   ) : route === "checkout-group" ? (
                     <CheckoutGroupPage 
-                      user={user} 
-                      setUser={setUser} 
-                      groupCart={groupCart} 
-                      setGroupCart={setGroupCart}
-                      groupDraft={groupDraft} 
-                      setGroupDraft={setGroupDraft}
-                      setRoute={setRoute} 
+                      setRoute={changeRoute}
                       setLastOrder={setLastOrder} 
                       showToast={showToast}
                     />
@@ -651,36 +600,19 @@ export default function App() {
                       activeSubscription={activeSubscription}
                       isSubLoading={isSubLoading}
                       todayOrder={todayOrder}
-                      subscription={subscription}
-                      setSubscription={setSubscription}
                       dashboardTab={dashboardTab}
                       viewMode={route === "dashboard" ? "tracking" : "planner"}
-                      holds={holds}
-                      setHolds={setHolds}
                       chefNote={chefNote}
-                      planMap={planMap}
-                      setPlanMap={setPlanMap}
                       thread={chefThreads}
                       sendMessage={handleSendMessage}
                       setRoute={changeRoute}
-                      groupCart={groupCart}
-                      setGroupCart={setGroupCart}
-                      groupDraft={groupDraft}
-                      setGroupDraft={setGroupDraft}
-                      startDates={startDates}
-                      setStartDates={setStartDates}
-                      targetMap={targetMap}
-                      setTargetMap={setTargetMap}
                       clearUnread={() => setUnreadChefMessages(0)}
                       showToast={showToast}
                     />
                   ) : route === "profile" ? (
                     <ErrorBoundary>
                     <UserSettingsPage 
-                      user={user} 
-                      setUser={setUser} 
                       setRoute={changeRoute} 
-                      setRegularCart={setRegularCart}
                       showToast={showToast}
                     />
                     </ErrorBoundary>
@@ -714,14 +646,9 @@ export default function App() {
                     <NotFoundPage onBack={() => changeRoute("home")} />
                   ) : route === "home" ? (
                     <LandingPage
-                      user={user}
                       setRoute={changeRoute}
-                      subscription={subscription}
-                      setSubscription={setSubscription}
                       setAuthOpen={setAuthOpen}
                       setAuthIntent={setAuthIntent}
-                      regularCart={regularCart}
-                      setRegularCart={setRegularCart}
                       setDashboardTab={setDashboardTab}
                       showToast={showToast}
                       activeSubscription={activeSubscription}

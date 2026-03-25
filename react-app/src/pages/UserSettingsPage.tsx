@@ -11,27 +11,25 @@ import { Button } from "../components/ui/Button";
 import { cn } from "../lib/utils";
 import { useAppSetting } from "../hooks/useAppSettings";
 import { supabase } from "../lib/supabase";
-import type { AppUser, Route, OrderReceipt } from "../types";
+import type { Route, OrderReceipt } from "../types";
 import { ProfileForm } from "../components/profile/ProfileForm";
 import { AddressManager } from "../components/profile/AddressManager";
 import { OrderHistory } from "../components/profile/OrderHistory";
 import { formatDateIndia } from "../lib/format";
+import { useUser } from "../contexts/UserContext";
+import { useCart } from "../contexts/CartContext";
 
 type TabId = "profile" | "subscription" | "history" | "settings";
 
 export function UserSettingsPage({
-  user,
-  setUser,
   setRoute,
-  setRegularCart,
   showToast,
 }: {
-  user: AppUser | null;
-  setUser: (u: AppUser | null) => void;
   setRoute: (r: Route) => void;
-  setRegularCart: React.Dispatch<React.SetStateAction<Record<string, number>>>;
   showToast: (msg: string) => void;
 }) {
+  const { user, setUser } = useUser();
+  const { setRegularCart } = useCart();
   const { value: rewardsEnabled } = useAppSetting("rewards_enabled", true);
   const { value: referralEnabled } = useAppSetting("referral_program_enabled", true);
   const [activeTab, setActiveTab] = useState<TabId>("profile");

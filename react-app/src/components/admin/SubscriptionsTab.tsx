@@ -11,7 +11,6 @@ import {
   Archive, 
   X
 } from "lucide-react";
-import { api } from "../../lib/api";
 import { supabase } from "../../lib/supabase";
 import { Button } from "../ui/Button";
 import { Card, CardHeader, CardContent } from "../ui/Card";
@@ -94,11 +93,10 @@ export default function SubscriptionsTab({ showToast, fetchOrders }: Subscriptio
     endDate.setDate(endDate.getDate() + days);
     const newEndDate = endDate.toISOString().slice(0, 10);
 
-    const { error } = await api.v1.manageSubscriptions({
-      action: 'add_days',
-      subscriptionId: subId,
-      data: { days, newDuration, newEndDate }
-    });
+    const { error } = await supabase
+      .from('subscriptions')
+      .update({ duration_days: newDuration, end_date: newEndDate })
+      .eq('id', subId);
 
     if (error) showToast("Error: " + error.message);
     else {
@@ -108,18 +106,50 @@ export default function SubscriptionsTab({ showToast, fetchOrders }: Subscriptio
   }
 
   async function deleteOrder(dbId: string) {
-    if (!window.confirm("Are you sure you want to permanently remove this subscription?")) return;
+    if (!window.confirm("Are you sure you want to permanently remove this subscription? This will also remove all associated daily orders.")) return;
 
-    const { error } = await api.v1.manageSubscriptions({
-      action: 'delete',
-      subscriptionId: dbId
-    });
+    try {
+      // 1. Get all child orders linked to this subscription
+      const { data: childOrders } = await supabase
+        .from('orders')
+        .select('id')
+        .eq('subscription_id', dbId);
 
-    if (error) {
-      showToast("Error removing subscription: " + error.message);
-    } else {
-      showToast("Subscription permanently removed.");
+      if (childOrders && childOrders.length > 0) {
+        const orderIds = childOrders.map(o => o.id);
+
+        // 2. Cleanup delivery assignments
+        await supabase
+          .from('delivery_assignments')
+          .delete()
+          .in('order_id', orderIds);
+
+        // 3. Cleanup order items
+        await supabase
+          .from('order_items')
+          .delete()
+          .in('order_id', orderIds);
+
+        // 4. Cleanup the orders themselves
+        await supabase
+          .from('orders')
+          .delete()
+          .in('id', orderIds);
+      }
+
+      // 5. Finally delete the subscription
+      const { error } = await supabase
+        .from('subscriptions')
+        .delete()
+        .eq('id', dbId);
+
+      if (error) throw error;
+
+      showToast("Subscription and all associated records permanently removed.");
       fetchSubscriptions();
+    } catch (err: any) {
+      console.error("Deletion failed:", err);
+      showToast("Error removing subscription: " + err.message);
     }
   }
 
@@ -164,16 +194,15 @@ export default function SubscriptionsTab({ showToast, fetchOrders }: Subscriptio
       { day: "Saturday",  slot: "Lunch", itemId: null, label: "Lunch (Selection Pending)", qty: 1 },
     ];
 
-    const { error } = await api.v1.manageSubscriptions({
-      action: 'manual_add',
-      data: {
-        userId: profiles.id,
-        name: msName,
-        duration: msDuration,
-        startDate: startStr,
-        endDate: endStr,
-        schedule: scheduleLines
-      }
+    const { error } = await supabase.from('subscriptions').insert({
+      user_id: profiles.id,
+      customer_name: msName,
+      duration_days: msDuration,
+      status: 'active',
+      start_date: startStr,
+      end_date: endStr,
+      schedule: scheduleLines,
+      plan_name: `${msDuration} Day Plan`,
     });
 
     if (error) {
@@ -370,10 +399,10 @@ export default function SubscriptionsTab({ showToast, fetchOrders }: Subscriptio
                         </div>
                         <button onClick={async () => {
                           const newStatus = sub.status === 'paused' ? 'active' : 'paused';
-                          const { error } = await api.v1.manageSubscriptions({
-                            action: sub.status === 'paused' ? 'resume' : 'pause',
-                            subscriptionId: sub.id
-                          });
+                          const { error } = await supabase
+                            .from('subscriptions')
+                            .update({ status: newStatus })
+                            .eq('id', sub.id);
                           if (!error) { showToast(`Subscription ${newStatus === 'paused' ? 'paused' : 'resumed'}.`); fetchSubscriptions(); }
                           else showToast('Error: ' + error.message);
                         }} className={`p-2 rounded-lg transition-all ${sub.status === 'paused' ? 'text-emerald-600 hover:bg-emerald-50' : 'text-amber-500 hover:bg-amber-50'}`}>

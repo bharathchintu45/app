@@ -128,7 +128,7 @@ export function DeliveryPage({ user, onBack, showToast }: { user: AppUser | null
     if (newStatus === 'picked_up') {
       const assignment = assignments.find(a => a.id === assignmentId);
       if (assignment?.order_id) {
-        const rawId = assignment.order_id.replace('-today', '');
+        const rawId = assignment.order_id; // Removed .replace('-today', '')
         const { data: order } = await supabase.from('orders').select('meta').eq('id', rawId).single();
         const currentMeta = safeParse(order?.meta) || {};
         
@@ -516,13 +516,36 @@ export function DeliveryPage({ user, onBack, showToast }: { user: AppUser | null
                            </div>
                          </summary>
                          <ul className="mt-4 space-y-3 px-1">
-                           {(order?.order_items || []).map((item: any, idx: number) => (
-                             <li key={idx} className="text-sm flex justify-between items-center group/item">
-                               <span className="text-slate-700 font-medium">{item.item_name || 'Unknown Item'}</span>
-                               <span className="w-8 h-8 rounded-lg bg-slate-50 flex items-center justify-center text-[10px] font-black text-slate-900 border border-slate-100">x{item.quantity}</span>
-                             </li>
-                           ))}
-                         </ul>
+                            {(() => {
+                              // Resolve items: use scheduleLines for subscriptions/personalized, else order_items
+                              const todayStr = new Date(new Date().getTime() + 5.5 * 60 * 60 * 1000).toISOString().slice(0, 10);
+                              const isSub = order?.kind === 'personalized' || order?.kind === 'subscription';
+                              
+                              if (isSub && order?.meta?.scheduleLines) {
+                                const linesForToday = (order.meta.scheduleLines || []).filter((l: any) => l.day === todayStr && l.qty > 0);
+                                if (linesForToday.length > 0) {
+                                  return linesForToday.map((l: any, idx: number) => (
+                                    <li key={idx} className="text-sm flex justify-between items-center group/item">
+                                      <span className="text-slate-700 font-medium italic">
+                                        <span className="text-[10px] font-black text-slate-400 mr-2 uppercase">[{l.slot}]</span>
+                                        {l.label}
+                                        {l.type === 'addon' && <span className="ml-2 text-[9px] font-black text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded uppercase tracking-tighter">Add-On</span>}
+                                      </span>
+                                      <span className="w-8 h-8 rounded-lg bg-slate-50 flex items-center justify-center text-[10px] font-black text-slate-900 border border-slate-100">x{l.qty}</span>
+                                    </li>
+                                  ));
+                                }
+                              }
+
+                              // Fallback to order_items
+                              return (order?.order_items || []).map((item: any, idx: number) => (
+                                <li key={idx} className="text-sm flex justify-between items-center group/item">
+                                  <span className="text-slate-700 font-medium">{item.item_name || 'Unknown Item'}</span>
+                                  <span className="w-8 h-8 rounded-lg bg-slate-50 flex items-center justify-center text-[10px] font-black text-slate-900 border border-slate-100">x{item.quantity}</span>
+                                </li>
+                              ));
+                            })()}
+                          </ul>
                        </details>
                     </div>
 

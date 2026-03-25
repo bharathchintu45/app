@@ -1,5 +1,8 @@
 import React, { useState, useEffect, useMemo } from "react";
-import type { MenuItem, StartDateMap, TargetMap, HoldsMap, PlanMap, Slot, OrderReceipt, AppUser, Route, DeliveryDetails, OrderKind, GroupCart, GroupOrderDraft } from "../types";
+import type { MenuItem, Slot, OrderReceipt, AppUser, Route, DeliveryDetails, OrderKind } from "../types";
+import { useUser } from "../contexts/UserContext";
+import { useCart } from "../contexts/CartContext";
+import { usePlan } from "../contexts/PlanContext";
 import { motion, AnimatePresence } from "framer-motion";
 import { buildPlanFromSubscription, makeOrderId } from "../data/menu";
 import { useRazorpay } from "../hooks/useRazorpay";
@@ -147,8 +150,6 @@ function DetailedScheduleReview({ lines }: { lines: Array<{ day: string; slot: S
 }
 
 function CheckoutCommon({
-  user,
-  setUser,
   headline,
   onBack,
   backLabel = "Back to Home",
@@ -162,8 +163,6 @@ function CheckoutCommon({
   enableFulfillmentToggle,
   onFulfillmentTypeChange,
 }: {
-  user: AppUser | null;
-  setUser?: React.Dispatch<React.SetStateAction<AppUser | null>>;
   headline: string;
   onBack: () => void;
   backLabel?: string;
@@ -177,11 +176,13 @@ function CheckoutCommon({
   enableFulfillmentToggle?: boolean;
   onFulfillmentTypeChange?: (type: "pickup" | "delivery") => void;
 }) {
+  const { user, setUser } = useUser();
   const pickupSetting = useAppSetting("enable_pickup", true);
   const deliverySetting = useAppSetting("enable_delivery", true);
-  const storeAddressSetting = useAppSettingString("store_address", "The Fresh Box\n123 Health Avenue, Fitness District\nCity Center, 500001");
+  const storeAddressSetting = useAppSettingString("store_physical_address", "The Fresh Box\n123 Health Avenue, Fitness District\nCity Center, 500001");
   const storeMapUrlSetting = useAppSettingString("store_map_url", "https://maps.google.com/?q=12.9715987,77.5945627");
-  const googleMapsApiKey = useAppSettingString("google_maps_api_key", "");
+  const googleMapsApiKeySetting = useAppSettingString("google_maps_api_key", "");
+  const googleMapsApiKey = googleMapsApiKeySetting.value || import.meta.env.VITE_GOOGLE_MAPS_API_KEY || "";
 
   const [fulfillmentType, setFulfillmentType] = useState<"delivery" | "pickup">("delivery");
 
@@ -306,17 +307,37 @@ function CheckoutCommon({
     if (!delivery.street.trim()) return showToast("Please enter street name.");
     if (!delivery.area.trim()) return showToast("Please enter area.");
 
-    // Auto-save address for new customers (first time checkout)
-    if (user?.id && setUser) {
-      const isFirstAddress = !user.defaultDelivery?.building && !(user.savedAddresses?.length);
-      if ((selectedIdx === 'new') && isFirstAddress && delivery.building) {
-        const updatedUser: AppUser = { ...user, defaultDelivery: delivery };
+    // Robust Auto-save logic: If any address is provided, ensure it's set as default and added to saved list if new.
+    if (user?.id && setUser && delivery.building) {
+      const currentDefault = user.defaultDelivery;
+      const savedList = user.savedAddresses || [];
+      
+      const isNewDefault = !currentDefault?.building || 
+        currentDefault.building !== delivery.building || 
+        currentDefault.street !== delivery.street || 
+        currentDefault.area !== delivery.area;
+        
+      const isAlreadyInSaved = savedList.some(a => 
+        a.building === delivery.building && a.street === delivery.street && a.area === delivery.area
+      );
+
+      if (isNewDefault || !isAlreadyInSaved) {
+        const updatedSavedAddresses = isAlreadyInSaved ? savedList : [...savedList, delivery];
+        const updatedUser: AppUser = { 
+          ...user, 
+          defaultDelivery: delivery,
+          savedAddresses: updatedSavedAddresses
+        };
+        
         setUser(updatedUser);
-        // Save to Supabase in the background
-        supabase.from('profiles').update({
+        
+        // Save to Database (Awaited to prevent race conditions on refresh)
+        const { error } = await supabase.from('profiles').update({
           default_delivery: delivery,
-          saved_addresses: [],
+          saved_addresses: updatedSavedAddresses,
         }).eq('id', user.id);
+        
+        if (error) console.error("[Checkout] Error auto-saving default address:", error);
       }
     }
 
@@ -681,22 +702,16 @@ function CheckoutCommon({
 }
 
 export function CheckoutRegularPage({
-  user,
-  setUser,
-  regularCart,
-  setRegularCart,
   setRoute,
   setLastOrder,
   showToast,
 }: {
-  user: AppUser | null;
-  setUser: React.Dispatch<React.SetStateAction<AppUser | null>>;
-  regularCart: Record<string, number>;
-  setRegularCart: React.Dispatch<React.SetStateAction<Record<string, number>>>;
   setRoute: (r: Route) => void;
   setLastOrder: React.Dispatch<React.SetStateAction<OrderReceipt | null>>;
   showToast: (msg: string) => void;
 }) {
+  const { user } = useUser();
+  const { regularCart, setRegularCart } = useCart();
   const { menu: MENU } = useMenu();
   const cartItems = useMemo(() => {
     return Object.entries(regularCart)
@@ -724,8 +739,6 @@ export function CheckoutRegularPage({
 
   return (
     <CheckoutCommon
-      user={user}
-      setUser={setUser}
       headline="Complete Your Order"
       onBack={() => setRoute("home")}
       showToast={showToast}
@@ -735,12 +748,7 @@ export function CheckoutRegularPage({
         if (!user) { showToast("Please sign in to place an order."); return; }
         setPayError("");
 
-        const isNew = !user.savedAddresses?.some(a => a.building === d.delivery.building && a.street === d.delivery.street);
-        if (isNew) {
-          const updatedAddresses = [...(user.savedAddresses || []), d.delivery];
-          setUser(prev => prev ? { ...prev, savedAddresses: updatedAddresses } : prev);
-          await supabase.from('profiles').update({ saved_addresses: updatedAddresses }).eq('id', user.id);
-        }
+        // Address saving is now handled centrally in CheckoutCommon.handlePlaceOrder
 
         const orderNumber = makeOrderId();
         const summary = computePriceSummary(
@@ -823,36 +831,24 @@ export function CheckoutRegularPage({
 }
 
 export function CheckoutPersonalPage({
-  user,
-  setUser,
-  subscription,
-  planMap,
-  setPlanMap,
-  holds,
-  setHolds,
   setRoute,
   setLastOrder,
   showToast,
-  startDates,
-  setStartDates,
-  targetMap,
-  setTargetMap,
 }: {
-  user: AppUser | null;
-  setUser: React.Dispatch<React.SetStateAction<AppUser | null>>;
-  subscription: string;
-  planMap: PlanMap;
-  setPlanMap: React.Dispatch<React.SetStateAction<PlanMap>>;
-  holds: HoldsMap;
-  setHolds: React.Dispatch<React.SetStateAction<HoldsMap>>;
   setRoute: (r: Route) => void;
   setLastOrder: React.Dispatch<React.SetStateAction<OrderReceipt | null>>;
   showToast: (msg: string) => void;
-  startDates: StartDateMap;
-  setStartDates: React.Dispatch<React.SetStateAction<StartDateMap>>;
-  targetMap: TargetMap;
-  setTargetMap: React.Dispatch<React.SetStateAction<TargetMap>>;
 }) {
+  const { user, setUser } = useUser();
+  const { 
+    subscription, 
+    planMap, 
+    holds, 
+    startDates, 
+    targetMap,
+    dateSlotAddons,
+    clearPlanningState 
+  } = usePlan();
   const plan = useMemo(() => buildPlanFromSubscription(subscription), [subscription]);
   const tomorrowKey = dayKey(addDays(new Date(), 1));
   const startKey = startDates[subscription] || startDates['last_selected'] || tomorrowKey;
@@ -860,7 +856,7 @@ export function CheckoutPersonalPage({
   const dates = useMemo(() => Array.from({ length: plan.duration }, (_, i) => dayKey(addDays(startDate, i))), [plan.duration, startDate]);
 
   const chargeable = useMemo(() => {
-    const lines: Array<{ day: string; slot: Slot; item: MenuItem; qty: number }> = [];
+    const lines: Array<{ day: string; slot: Slot; item: MenuItem; qty: number; type?: 'meal' | 'addon' }> = [];
     for (const dk of dates) {
       const hold = holds[dk] || { day: false, slots: {} };
       if (hold.day) continue;
@@ -868,8 +864,18 @@ export function CheckoutPersonalPage({
       for (const s of plan.allowedSlots) {
         if (hold.slots[s]) continue;
         const it = dp[s];
-        if (!it) continue;
-        lines.push({ day: dk, slot: s, item: it, qty: 1 });
+        if (it) lines.push({ day: dk, slot: s, item: it, qty: 1, type: 'meal' });
+      }
+      // Include addons for this day
+      const dayAddons = dateSlotAddons[dk];
+      if (dayAddons) {
+        for (const s of plan.allowedSlots) {
+          if (hold.slots[s]) continue;
+          const addonList = dayAddons[s] || [];
+          for (const a of addonList) {
+            lines.push({ day: dk, slot: s, item: a.item, qty: a.qty, type: 'addon' });
+          }
+        }
       }
     }
 
@@ -877,11 +883,11 @@ export function CheckoutPersonalPage({
     for (const l of lines) {
       const key = l.item.id;
       const cur = agg.get(key);
-      if (cur) cur.qty += 1;
-      else agg.set(key, { id: l.item.id, name: l.item.name, qty: 1, price: l.item.priceINR });
+      if (cur) cur.qty += l.qty;
+      else agg.set(key, { id: l.item.id, name: l.item.name, qty: l.qty, price: l.item.priceINR });
     }
     return { lines, items: Array.from(agg.values()) };
-  }, [dates, holds, plan.allowedSlots, planMap]);
+  }, [dates, holds, plan.allowedSlots, planMap, dateSlotAddons]);
 
   const taxSetting = useAppSettingNumber("tax_percentage", 5);
   const deliveryFeeSetting = useAppSettingNumber("delivery_fee", 0);
@@ -901,8 +907,6 @@ export function CheckoutPersonalPage({
 
   return (
     <CheckoutCommon
-      user={user}
-      setUser={setUser}
       headline={`Subscribe • ${plan.title}`}
       hideSignInNote
       onBack={() => setRoute("app")}
@@ -948,12 +952,11 @@ export function CheckoutPersonalPage({
         );
         const orderNumber = makeOrderId();
 
-        const isNew = !user.savedAddresses?.some(a => a.building === d.delivery.building && a.street === d.delivery.street);
-        const updatedAddresses = isNew ? [...(user.savedAddresses || []), d.delivery] : (user.savedAddresses || []);
-
         const processOrder = async () => {
-          setUser(prev => prev ? { ...prev, isPro: true, savedAddresses: updatedAddresses } : prev);
-          await supabase.from('profiles').update({ saved_addresses: updatedAddresses, is_pro: true }).eq('id', user.id);
+          // Address saving is now handled centrally in CheckoutCommon.handlePlaceOrder
+          // We still need to mark as Pro for subscriptions
+          setUser(prev => prev ? { ...prev, isPro: true } : prev);
+          await supabase.from('profiles').update({ is_pro: true }).eq('id', user.id);
 
           const endDate = dayKey(addDays(parseDateKeyToDate(startKey), Math.max(0, plan.duration - 1)));
           // ── No parent 'orders' row for subscriptions anymore! ──
@@ -964,7 +967,8 @@ export function CheckoutPersonalPage({
           // This is the source of truth for App.tsx dashboard display and admin management
           const scheduleLines = chargeable.lines.map(l => ({
             day: l.day, slot: l.slot, itemId: l.item.id,
-            label: l.item.name, qty: l.qty, unitPriceAtOrder: l.item.priceINR
+            label: l.item.name, qty: l.qty, unitPriceAtOrder: l.item.priceINR,
+            ...(l.type === 'addon' ? { type: 'addon' } : {})
           }));
           const { data: subData, error: subTableErr } = await supabase.from('subscriptions').insert({
             user_id: user.id,
@@ -999,16 +1003,18 @@ export function CheckoutPersonalPage({
               plan: plan.title, startDate: startKey, endDate: dayKey(addDays(parseDateKeyToDate(startKey), Math.max(0, plan.duration - 1))), durationDays: plan.duration, mealsPerDay: plan.allowedSlots.length, chargeableDeliveries: chargeable.lines.length,
               scheduleLines: chargeable.lines.map((l) => ({ day: l.day, slot: l.slot, itemId: l.item.id, label: l.item.name, qty: l.qty, unitPriceAtOrder: l.item.priceINR })) 
             },
-            lines: deliveredItems.map((it) => ({ itemId: it.id, label: it.name, qty: 1, unitPriceAtOrder: it.priceINR })),
+            lines: chargeable.lines.map((l) => ({
+              itemId: l.item.id,
+              label: l.type === 'addon' ? `${l.item.name} [Add-on]` : l.item.name,
+              qty: l.qty,
+              unitPriceAtOrder: l.item.priceINR,
+            })),
             priceSummary: summary,
           };
           setLastOrder(receipt);
           
-          // Clear persistent state on success
-          setPlanMap({});
-          setHolds({});
-          setStartDates({});
-          setTargetMap({});
+          // Clear persistent planning state on success
+          clearPlanningState();
 
           // Trigger welcome email in the background (fire and forget)
           api.v1.sendWelcomeEmail(subData.id).catch(console.error);
@@ -1064,26 +1070,16 @@ export function CheckoutPersonalPage({
 }
 
 export function CheckoutGroupPage({
-  user,
-  setUser,
-  groupCart,
-  setGroupCart,
-  groupDraft,
-  setGroupDraft,
   setRoute,
   setLastOrder,
   showToast,
 }: {
-  user: AppUser | null;
-  setUser: React.Dispatch<React.SetStateAction<AppUser | null>>;
-  groupCart: GroupCart;
-  setGroupCart: React.Dispatch<React.SetStateAction<GroupCart>>;
-  groupDraft: GroupOrderDraft;
-  setGroupDraft: React.Dispatch<React.SetStateAction<GroupOrderDraft>>;
   setRoute: (r: Route) => void;
   setLastOrder: React.Dispatch<React.SetStateAction<OrderReceipt | null>>;
   showToast: (msg: string) => void;
 }) {
+  const { user } = useUser();
+  const { groupCart, setGroupCart, groupDraft, setGroupDraft } = useCart();
   const { menu: MENU } = useMenu();
   const cartItems = useMemo(() => {
     return Object.entries(groupCart)
@@ -1129,8 +1125,6 @@ export function CheckoutGroupPage({
 
   return (
     <CheckoutCommon
-      user={user}
-      setUser={setUser}
       headline="Group Order Checkout"
       hideSignInNote
       onBack={() => setRoute("app")}
@@ -1151,12 +1145,7 @@ export function CheckoutGroupPage({
 
         setPayError("");
 
-        const isNew = !user.savedAddresses?.some(a => a.building === d.delivery.building && a.street === d.delivery.street);
-        if (isNew) {
-          const updatedAddresses = [...(user.savedAddresses || []), d.delivery];
-          setUser(prev => prev ? { ...prev, savedAddresses: updatedAddresses } : prev);
-          await supabase.from('profiles').update({ saved_addresses: updatedAddresses }).eq('id', user.id);
-        }
+        // Address saving is now handled centrally in CheckoutCommon.handlePlaceOrder
 
         const orderNumber = makeOrderId();
         const summary = computePriceSummary(

@@ -11,6 +11,7 @@ import { cn } from "../../lib/utils";
 import { MealPopup } from "./MealPopup";
 import { AddonPopup } from "./AddonPopup";
 import type { SlotAddons } from "./AddonPopup";
+import { PlanMenuItemCard } from "./PlanMenuItemCard";
 import type { PlanConfig, Macros, MenuItem, StartDateMap, TargetMap, HoldsMap, PlanMap, Slot, DayHold } from "../../types";
 
 const MENU_SECTIONS = [
@@ -19,13 +20,7 @@ const MENU_SECTIONS = [
   { id: "extra", name: "Add-Ons", note: "Coffee, smoothies & sides", kind: "addon" as const },
 ] as const;
 
-function Pill({ children }: { children: React.ReactNode }) {
-  return <span className="text-[10px] font-bold uppercase tracking-normal sm:tracking-widest px-2 py-0.5 rounded bg-black/5 text-black/60">{children}</span>;
-}
-
-function getItemImage(it: MenuItem) {
-  return it.image || 'https://images.unsplash.com/photo-1490645935967-10de6ba17061?w=600&q=80';
-}
+// Component for plan menu item cards
 
 function MacroLine({ label, value, target, unit, icon: Icon, color, bg }: { label: string; value: number; target: number; unit: string; icon: any; color: string; bg: string }) {
   const pct = target > 0 ? Math.round((value / target) * 100) : 0;
@@ -170,19 +165,22 @@ export function PersonalizedPlanView({
 
   const isAddonSection = MENU_SECTIONS.find(s => s.id === section)?.kind === "addon";
 
-  const { chargeableCount } = useMemo(() => {
+  const { chargeableCount, emptyDays } = useMemo(() => {
     let count = 0;
-    let totalNeeded = 0;
+    const empty: string[] = [];
     for (const dk of dates) {
       if (holds[dk]?.day) continue;
       const dp = planMap[dk] || {};
       const heldSlots = holds[dk]?.slots || {};
+      let dayHasEmpty = false;
       for (const s of plan.allowedSlots) {
-        totalNeeded++;
-        if (!heldSlots[s] && dp[s]) count++;
+        if (heldSlots[s]) continue;
+        if (dp[s]) { count++; }
+        else { dayHasEmpty = true; }
       }
+      if (dayHasEmpty) empty.push(dk);
     }
-    return { chargeableCount: count };
+    return { chargeableCount: count, emptyDays: empty };
   }, [dates, holds, plan.allowedSlots, planMap]);
 
   function goPersonalizedCheckout() {
@@ -319,7 +317,7 @@ export function PersonalizedPlanView({
         </div>
 
         {/* STEP 3: Pick a day */}
-        <div className="rounded-xl border border-black/10 p-4">
+        <div id="plan-day-picker" className="rounded-xl border border-black/10 p-4">
           <div className="flex items-center gap-2 mb-3">
             <div className="w-7 h-7 rounded-full bg-black text-white flex items-center justify-center text-xs font-bold">3</div>
             <div className="text-sm font-semibold">Select a Day & Pick Meals</div>
@@ -568,62 +566,14 @@ export function PersonalizedPlanView({
                       </div>
                     ) : (
                       sectionItems.map((it) => (
-                        <div
+                        <PlanMenuItemCard
                           key={it.id}
-                          className="w-full rounded-xl border border-slate-100 bg-white p-2.5 text-left transition-all hover:border-slate-200 hover:shadow-sm"
-                        >
-                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 w-full">
-                            <div className="flex items-center gap-3 min-w-0 w-full sm:w-auto cursor-pointer" onClick={() => setModalItem(it)}>
-                              <div className="relative shrink-0">
-                                <img src={getItemImage(it)} alt={it.name} className="w-16 h-16 rounded-xl object-cover shadow-sm" loading="lazy" />
-                              </div>
-                              <div className="min-w-0 flex-1">
-                                <div className="font-bold text-sm text-slate-900 leading-tight mb-0.5">{it.name}</div>
-                                {it.description && <div className="text-[10px] text-slate-500 line-clamp-2 leading-relaxed font-medium mb-2">{it.description}</div>}
-                                <div className="hidden sm:flex items-center gap-1.5 flex-wrap">
-                                  <Pill>{it.calories} kcal</Pill>
-                                  <Pill>P{it.protein}g</Pill>
-                                  {typeof it.priceINR === "number" && (
-                                    <span className="text-[9px] font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded shadow-sm border border-emerald-100">
-                                      ₹{Math.round(it.priceINR * (1 - personalizedDiscount.value/100))}
-                                    </span>
-                                  )}
-                                </div>
-                              </div>
-                            </div>
-                            <div className="flex items-center justify-between sm:justify-end sm:w-auto shrink-0 pt-2 border-t border-slate-50 sm:border-0 sm:pt-0">
-                              {/* Mobile Nutritional Pills */}
-                              <div className="flex sm:hidden items-center gap-1.5 flex-wrap">
-                                <Pill>{it.calories} kcal</Pill>
-                                <Pill>P{it.protein}g</Pill>
-                                {typeof it.priceINR === "number" && (
-                                  <span className="text-[9px] font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded shadow-sm border border-emerald-100">
-                                    ₹{Math.round(it.priceINR * (1 - personalizedDiscount.value/100))}
-                                  </span>
-                                )}
-                              </div>
-                              {isAddonSection ? (
-                                <Button 
-                                  size="sm" 
-                                  className="h-8 px-4 text-[10px] font-black uppercase tracking-wider bg-amber-500 text-white hover:bg-amber-600 border-amber-600 shadow-sm"
-                                  onClick={() => setAddonPopup(it)}
-                                  disabled={it.available === false}
-                                >
-                                  Attach Add-On
-                                </Button>
-                              ) : (
-                                <Button 
-                                  size="sm" 
-                                  className="h-8 px-4 text-[10px] font-black uppercase tracking-wider bg-emerald-600 text-white hover:bg-emerald-700 shadow-sm"
-                                  onClick={() => setPopup(it)}
-                                  disabled={it.available === false}
-                                >
-                                  Choose Meal
-                                </Button>
-                              )}
-                            </div>
-                          </div>
-                        </div>
+                          item={it}
+                          onOpenModal={setModalItem}
+                          onAction={isAddonSection ? setAddonPopup : setPopup}
+                          isAddon={isAddonSection}
+                          personalizedDiscount={personalizedDiscount.value}
+                        />
                       ))
                     )}
                   </div>
@@ -638,16 +588,78 @@ export function PersonalizedPlanView({
             <div className="w-7 h-7 rounded-full bg-black text-white flex items-center justify-center text-xs font-bold">4</div>
             <div className="text-sm font-semibold">{hasActiveSubscription ? "Active Plan Found" : "Ready to Order?"}</div>
           </div>
+
+          {/* Empty days warning */}
+          {emptyDays.length > 0 && !hasActiveSubscription && (
+            <div className="mb-4 p-4 rounded-2xl bg-amber-50 border border-amber-200 space-y-3">
+              <div className="flex items-start gap-3">
+                <div className="w-8 h-8 rounded-xl bg-amber-100 flex items-center justify-center shrink-0 mt-0.5">
+                  <CalendarDays size={16} className="text-amber-600" />
+                </div>
+                <div>
+                  <div className="text-sm font-bold text-amber-900">
+                    {emptyDays.length} day{emptyDays.length !== 1 ? 's' : ''} have empty meal slots
+                  </div>
+                  <div className="text-xs text-amber-700/80 mt-0.5">
+                    Please select meals for all days, or hold the empty days to proceed to checkout.
+                  </div>
+                  <div className="flex flex-wrap gap-1.5 mt-2">
+                    {emptyDays.slice(0, 5).map(dk => (
+                      <span key={dk} className="text-[10px] font-bold bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full border border-amber-200">
+                        {formatDateIndia(dk)}
+                      </span>
+                    ))}
+                    {emptyDays.length > 5 && (
+                      <span className="text-[10px] font-bold text-amber-600">+{emptyDays.length - 5} more</span>
+                    )}
+                  </div>
+                </div>
+              </div>
+              <div className="flex flex-col sm:flex-row gap-2">
+                <Button 
+                  onClick={() => {
+                    if (emptyDays[0]) setSelectedDate(emptyDays[0]);
+                    document.getElementById('plan-day-picker')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                  }}
+                  className="flex-1 bg-white hover:bg-amber-50 text-amber-800 border border-amber-200 shadow-sm text-xs font-bold"
+                  size="sm"
+                >
+                  <CalendarDays className="mr-1.5 h-3.5 w-3.5" /> Select Meals for Empty Days
+                </Button>
+                <Button
+                  onClick={() => {
+                    for (const dk of emptyDays) {
+                      toggleHold(dk, 'day');
+                    }
+                  }}
+                  className="flex-1 bg-amber-600 hover:bg-amber-700 text-white shadow-sm text-xs font-bold border-transparent"
+                  size="sm"
+                >
+                  Hold {emptyDays.length} Empty Day{emptyDays.length !== 1 ? 's' : ''}
+                </Button>
+              </div>
+            </div>
+          )}
+
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
             <div className="text-sm text-black/55">
               {chargeableCount} meal{chargeableCount !== 1 ? 's' : ''} scheduled
+              {emptyDays.length > 0 && !hasActiveSubscription && (
+                <span className="text-amber-600 font-bold ml-1">
+                  · {emptyDays.length} day{emptyDays.length !== 1 ? 's' : ''} incomplete
+                </span>
+              )}
             </div>
             {hasActiveSubscription ? (
               <Button onClick={() => setRoute("dashboard")} className="w-full sm:w-auto bg-orange-500 hover:bg-orange-600 text-white border-transparent shadow-sm px-6 py-4 text-sm font-black uppercase tracking-wider">
                 Go to Dashboard <ArrowRight className="ml-2 h-4 w-4" />
               </Button>
             ) : (
-              <Button onClick={goPersonalizedCheckout} className="w-full sm:w-auto">
+              <Button 
+                onClick={goPersonalizedCheckout} 
+                className="w-full sm:w-auto"
+                disabled={emptyDays.length > 0 || chargeableCount === 0}
+              >
                 Checkout <ArrowRight className="ml-2 h-4 w-4" />
               </Button>
             )}

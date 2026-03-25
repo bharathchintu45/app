@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { Printer, X, Eye } from "lucide-react";
 
 /** Builds the raw HTML for one receipt label (inline styles, no external deps) */
-export function buildSingleLabelHtml(order: OrderReceipt): string {
+export function buildSingleLabelHtml(order: OrderReceipt, gstRate: number = 0.05): string {
   const fmtDate = (ts: number) => {
     const d = new Date(ts);
     return d.toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: '2-digit', year: 'numeric' });
@@ -70,7 +70,7 @@ export function buildSingleLabelHtml(order: OrderReceipt): string {
           </div>
           ${order.priceSummary.gst > 0 ? `
           <div style="display:flex;justify-content:space-between;font-weight:700;font-size:8px;margin-bottom:2px">
-            <span>GST (5%)</span>
+            <span>GST (${Math.round(gstRate * 100)}%)</span>
             <span>₹${order.priceSummary.gst}</span>
           </div>` : ''}
           <div style="display:flex;justify-content:space-between;font-weight:700;font-size:8px;margin-bottom:2px">
@@ -92,8 +92,8 @@ export function buildSingleLabelHtml(order: OrderReceipt): string {
 }
 
 /** Builds the full page HTML for multiple labels */
-export function buildLabelsPageHtml(orders: OrderReceipt[], title: string): string {
-  const labelsHtml = orders.map(o => buildSingleLabelHtml(o)).join('');
+export function buildLabelsPageHtml(orders: OrderReceipt[], title: string, gstRate: number = 0.05): string {
+  const labelsHtml = orders.map(o => buildSingleLabelHtml(o, gstRate)).join('');
   return `<!DOCTYPE html>
     <html><head><title>${title}</title>
     <style>
@@ -123,16 +123,18 @@ export function BillPreviewModal({
   orders,
   onPrint,
   onClose,
+  gstRate = 0.05
 }: {
   orders: OrderReceipt[];
   onPrint: () => void;
   onClose: () => void;
+  gstRate?: number;
 }) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [loaded, setLoaded] = useState(false);
 
   const pdfTitle = generatePdfTitle(orders);
-  const pageHtml = buildLabelsPageHtml(orders, pdfTitle);
+  const pageHtml = buildLabelsPageHtml(orders, pdfTitle, gstRate);
 
   useEffect(() => {
     if (iframeRef.current) {

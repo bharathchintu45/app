@@ -1,6 +1,8 @@
 import { useState, useMemo, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import type { AppUser, Route, DashboardTab, MenuItem, GroupCart, GroupOrderDraft, PlanMap, HoldsMap, StartDateMap, TargetMap, Slot, ThreadMsg } from "../types";
+import type { AppUser, Route, DashboardTab, MenuItem, Slot, ThreadMsg, PlanMap, HoldsMap } from "../types";
+import { useCart } from "../contexts/CartContext";
+import { usePlan } from "../contexts/PlanContext";
 import type { SlotAddons } from "../components/dashboard/AddonPopup";
 import { buildPlanFromSubscription, sumMacros, prunePlanMapToAllowed } from "../data/menu";
 import { useMenu } from "../hooks/useMenu";
@@ -22,25 +24,11 @@ export function DashboardPage({
   user,
   activeSubscription,
   todayOrder,
-  subscription,
-  setSubscription,
   dashboardTab,
-  holds,
-  setHolds,
   chefNote,
-  planMap,
-  setPlanMap,
   thread,
   sendMessage,
   setRoute,
-  groupCart,
-  setGroupCart,
-  groupDraft,
-  setGroupDraft,
-  startDates,
-  setStartDates,
-  targetMap,
-  setTargetMap,
   clearUnread,
   viewMode,
   showToast,
@@ -50,30 +38,25 @@ export function DashboardPage({
   activeSubscription?: any;
   isSubLoading?: boolean;
   todayOrder?: import("../types").OrderReceipt | null;
-  subscription: string;
-  setSubscription: (id: string) => void;
   dashboardTab: DashboardTab;
   viewMode: "planner" | "tracking";
-  holds: HoldsMap;
-  setHolds: React.Dispatch<React.SetStateAction<HoldsMap>>;
   chefNote?: string;
-  planMap: PlanMap;
-  setPlanMap: React.Dispatch<React.SetStateAction<PlanMap>>;
   thread: ThreadMsg[];
   sendMessage: (text: string) => Promise<void>;
   setRoute: (r: Route) => void;
-  groupCart: GroupCart;
-  setGroupCart: React.Dispatch<React.SetStateAction<GroupCart>>;
-  groupDraft: GroupOrderDraft;
-  setGroupDraft: React.Dispatch<React.SetStateAction<GroupOrderDraft>>;
   triggerRefetch?: () => void;
-  startDates: StartDateMap;
-  setStartDates: React.Dispatch<React.SetStateAction<StartDateMap>>;
-  targetMap: TargetMap;
-  setTargetMap: React.Dispatch<React.SetStateAction<TargetMap>>;
   clearUnread?: () => void;
   showToast: (msg: string) => void;
 }) {
+  const { groupCart, setGroupCart, groupDraft, setGroupDraft } = useCart();
+  const { 
+    subscription, setSubscription,
+    planMap, setPlanMap,
+    holds, setHolds,
+    startDates, setStartDates,
+    targetMap, setTargetMap,
+    dateSlotAddons, setDateSlotAddons
+  } = usePlan();
   const { menu: MENU, loading } = useMenu();
   const plan = useMemo(() => buildPlanFromSubscription(subscription), [subscription]);
 
@@ -154,13 +137,14 @@ export function DashboardPage({
   // Popup-based meal selection state
   const [popup, setPopup] = useState<MenuItem | null>(null);
   const [addonPopup, setAddonPopup] = useState<MenuItem | null>(null);
-  const [slotAddons, setSlotAddons] = useState<SlotAddons>({} as SlotAddons);
+
+  // Derive per-day SlotAddons from context (keyed by date)
+  const slotAddons: SlotAddons = dateSlotAddons[selectedDate] || ({} as SlotAddons);
 
   function upsertMeal(slot: Slot, item: MenuItem) {
     const dayPlan = currentPlanMap[selectedDate] || {};
     const slotAlreadyFilled = !!dayPlan[slot];
     if (!slotAlreadyFilled) {
-      // Count how many slots currently have a meal
       const filledCount = plan.allowedSlots.filter((s) => !!dayPlan[s]).length;
       if (filledCount >= plan.maxMeals) {
         showToast(`Your plan allows ${plan.maxMeals} meal${plan.maxMeals > 1 ? "s" : ""}/day. Remove a meal first or upgrade your plan.`);
@@ -181,23 +165,27 @@ export function DashboardPage({
   }
 
   function attachAddon(slot: Slot, item: MenuItem) {
-    setSlotAddons((prev) => {
-      const list = [...(prev[slot] || [])];
+    setDateSlotAddons((prev) => {
+      const dayAddons = { ...(prev[selectedDate] || {} as SlotAddons) };
+      const list = [...(dayAddons[slot] || [])];
       const idx = list.findIndex((a) => a.item.id === item.id);
       if (idx >= 0) list[idx] = { ...list[idx], qty: list[idx].qty + 1 };
       else list.push({ item, qty: 1 });
-      return { ...prev, [slot]: list };
+      dayAddons[slot] = list;
+      return { ...prev, [selectedDate]: dayAddons };
     });
   }
 
   function removeAddon(slot: Slot, item: MenuItem) {
-    setSlotAddons((prev) => {
-      const list = [...(prev[slot] || [])];
+    setDateSlotAddons((prev) => {
+      const dayAddons = { ...(prev[selectedDate] || {} as SlotAddons) };
+      const list = [...(dayAddons[slot] || [])];
       const idx = list.findIndex((a) => a.item.id === item.id);
       if (idx < 0) return prev;
       if (list[idx].qty <= 1) list.splice(idx, 1);
       else list[idx] = { ...list[idx], qty: list[idx].qty - 1 };
-      return { ...prev, [slot]: list };
+      dayAddons[slot] = list;
+      return { ...prev, [selectedDate]: dayAddons };
     });
   }
 
@@ -540,7 +528,7 @@ export function DashboardPage({
                 selectedDate={selectedDate}
                 setSelectedDate={setSelectedDate}
                 chefNote={chefNote}
-                slotAddons={slotAddons}
+                 slotAddons={dateSlotAddons}
               />
           ) : viewMode === "tracking" && activeSubscription?.status === 'removed_by_admin' ? (
             /* ── Admin removal state ── */

@@ -48,6 +48,7 @@ export function MapPicker({ apiKey, initialPos, onPositionChange }: MapPickerPro
 
     const script = document.createElement('script');
     script.id = 'google-maps-script';
+    console.log('[MapPicker] Loading Google Maps script with key length:', apiKey?.length || 0);
     script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=places`;
     script.async = true;
     script.defer = true;
@@ -68,13 +69,29 @@ export function MapPicker({ apiKey, initialPos, onPositionChange }: MapPickerPro
         const components: AddressComponents = {};
         const res = results[0];
         
-        // Map Google address components to our fields
+        // Map Google address components to our fields with priority for Indian addresses
+        const addr: any = {};
         res.address_components.forEach((c: any) => {
-          if (c.types.includes('sublocality_level_1') || c.types.includes('locality')) components.area = c.long_name;
-          if (c.types.includes('route')) components.street = c.long_name;
-          if (c.types.includes('subpremise') || c.types.includes('premise')) components.building = c.long_name;
-          if (c.types.includes('administrative_area_level_2')) components.city = c.long_name;
+          const types = c.types;
+          // Area Priority: Sublocality L1 > Sublocality L2 > Neighborhood > Locality
+          if (types.includes('sublocality_level_1')) addr.sub1 = c.long_name;
+          else if (types.includes('sublocality_level_2')) addr.sub2 = c.long_name;
+          else if (types.includes('neighborhood')) addr.neigh = c.long_name;
+          else if (types.includes('locality')) addr.loc = c.long_name;
+
+          // Street
+          if (types.includes('route')) components.street = c.long_name;
+
+          // Building Priority: Premise > Subpremise > Point of Interest
+          if (types.includes('premise') || types.includes('subpremise') || types.includes('point_of_interest')) {
+            components.building = components.building ? `${c.long_name}, ${components.building}` : c.long_name;
+          }
+          
+          if (types.includes('administrative_area_level_2')) components.city = c.long_name;
         });
+
+        // Consolidate Area
+        components.area = addr.sub1 || addr.sub2 || addr.neigh || addr.loc || "";
 
         onPositionChange(pos, components);
       }

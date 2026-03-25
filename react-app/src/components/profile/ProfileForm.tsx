@@ -62,7 +62,7 @@ export function ProfileForm({ user, setUser }: ProfileFormProps) {
     if (error) {
       setSaveMsg('❌ Save failed: ' + error.message);
     } else {
-      setUser({ ...user, name: formData.name, email: formData.email, defaultDelivery: formData.delivery });
+      setUser({ ...user, name: formData.name, email: formData.email });
       setSaveMsg('✅ Profile updated!');
       setEditing(false);
     }

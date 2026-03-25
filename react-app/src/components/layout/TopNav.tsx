@@ -7,11 +7,12 @@ import { cn } from "../../lib/utils";
 import { supabase } from "../../lib/supabase";
 import { motion, AnimatePresence } from "framer-motion";
 
+import { useUser } from "../../contexts/UserContext";
+
 export function TopNav({
   route,
   setRoute,
-  user,
-  setUser,
+  dashboardTab,
   setDashboardTab,
   setAuthOpen,
   setAuthIntent,
@@ -20,8 +21,6 @@ export function TopNav({
 }: {
   route: Route;
   setRoute: (r: Route) => void;
-  user: AppUser | null;
-  setUser: React.Dispatch<React.SetStateAction<AppUser | null>>;
   dashboardTab: DashboardTab;
   setDashboardTab: (t: DashboardTab) => void;
   authOpen: boolean;
@@ -31,6 +30,7 @@ export function TopNav({
   unreadChefMessages?: number;
   hasActiveSubscription?: boolean;
 }) {
+  const { user, setUser } = useUser();
   const [mobileMenuOpen, setMobileMenuOpen] = React.useState(false);
   const enablePersonalizedSubscriptions = useAppSetting("enable_personalized_subscriptions", true);
 

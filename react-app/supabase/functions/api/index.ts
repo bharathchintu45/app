@@ -77,6 +77,13 @@ const supabaseAdmin = () => createClient(
   Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 );
 
+function getISTDate() {
+  const d = new Date();
+  // Adjust for UTC+5:30
+  d.setMinutes(d.getMinutes() + 330);
+  return d.toISOString().slice(0, 10);
+}
+
 // --- HANDLERS ---
 
 async function handleRazorpayOrder(req: Request, headers: any) {
@@ -182,7 +189,17 @@ async function handleGenerateDailyOrders(req: Request, headers: any) {
   const admin = supabaseAdmin();
   let body: any = {};
   if (req.method === 'POST') try { body = await req.json(); } catch(e) {}
-  const targetDate = body?.targetDate || new Date().toISOString().slice(0, 10);
+  
+  // Use provided date OR default to IST today (not UTC today!)
+  const targetDate = body?.targetDate || getISTDate();
+  
+  // 0. Fetch Dynamic Settings
+  const { data: settings } = await admin.from('app_settings').select('key, value');
+  const getSetting = (key: string, def: any) => settings?.find(s => s.key === key)?.value ?? def;
+  
+  const taxPct = Number(getSetting('tax_percentage', 5));
+  const gstRate = taxPct / 100;
+  const slotMappings = getSetting('slot_mappings', {});
   
   // 1. Fetch all active subscriptions
   const { data: subs, error: subErr } = await admin
@@ -194,7 +211,7 @@ async function handleGenerateDailyOrders(req: Request, headers: any) {
 
   if (subErr) throw subErr;
   
-  console.log(`[GEN_ORDERS] Target: ${targetDate}. Found ${subs?.length || 0} active subs.`);
+  console.log(`[GEN_ORDERS] Target: ${targetDate}. Found ${subs?.length || 0} active subs. GST: ${taxPct}%`);
 
   if (!subs || subs.length === 0) {
     return new Response(JSON.stringify({ success: true, message: 'No active subscriptions', created: 0 }), { status: 200, headers: { ...headers, 'Content-Type': 'application/json' } });
@@ -205,19 +222,7 @@ async function handleGenerateDailyOrders(req: Request, headers: any) {
   const targetDayName = dayNames[new Date(targetDate + 'T12:00:00Z').getDay()];
 
   for (const sub of subs) {
-    console.log(`[GEN_ORDERS] Processing ${sub.customer_name} (${sub.id}) | starts: ${sub.start_date}`);
-    // Check if order already exists for this sub and date
-    const { data: existing } = await admin
-      .from('orders')
-      .select('id')
-      .eq('delivery_date', targetDate)
-      .filter('meta->>subscription_id', 'eq', sub.id)
-      .filter('meta->>is_auto_generated', 'eq', 'true');
-
-    if (existing && existing.length > 0) {
-      console.log(`[GEN_ORDERS] -> Skipped: Order already exists`);
-      continue;
-    }
+    console.log(`[GEN_ORDERS] Processing ${sub.customer_name} (${sub.id.slice(0,8)})`);
 
     // Fetch holds for target date
     const { data: hold } = await admin.from('subscription_holds')
@@ -260,7 +265,6 @@ async function handleGenerateDailyOrders(req: Request, headers: any) {
         const slot = swap.slot || 'Meal';
         let existingLine = dayLines.find(l => (l.slot || 'Meal') === slot);
         
-        // Fetch new menu item details
         const { data: menuItem } = await admin.from('menu_items')
           .select('name, price_inr')
           .eq('id', swap.menu_item_id)
@@ -273,11 +277,10 @@ async function handleGenerateDailyOrders(req: Request, headers: any) {
             existingLine.unitPriceAtOrder = menuItem.price_inr || 0;
           }
         } else {
-          // Add as a new line if it didn't exist in schedule
           dayLines.push({
             itemId: swap.menu_item_id,
             slot: slot,
-            qty: 1, // Default swap qty
+            qty: 1,
             label: menuItem?.name || "Swapped Item",
             unitPriceAtOrder: menuItem?.price_inr || 0
           });
@@ -286,7 +289,7 @@ async function handleGenerateDailyOrders(req: Request, headers: any) {
     }
 
     if (dayLines.length === 0) {
-      console.log(`[GEN_ORDERS] -> Skipped: No schedule or swaps found for targetDate ${targetDate}.`);
+      console.log(`[GEN_ORDERS] -> Skipped: No schedule for ${targetDate}`);
       continue;
     }
 
@@ -296,11 +299,11 @@ async function handleGenerateDailyOrders(req: Request, headers: any) {
     }
 
     if (dayLines.length === 0) {
-      console.log(`[GEN_ORDERS] -> Skipped: All matched slots were held.`);
+      console.log(`[GEN_ORDERS] -> Skipped: All slots held.`);
       continue;
     }
 
-    // 4. Ensure all dayLines have prices
+    // Ensure prices are current if missing
     const missingPriceIds = [...new Set(dayLines.filter(l => l.itemId && l.unitPriceAtOrder === undefined).map(l => l.itemId))];
     if (missingPriceIds.length > 0) {
       const { data: menuItems } = await admin.from('menu_items').select('id, price_inr').in('id', missingPriceIds);
@@ -312,55 +315,56 @@ async function handleGenerateDailyOrders(req: Request, headers: any) {
       }
     }
 
-    // Group by slot
+    // Group by slot and Create atomically via RPC
     const slots = [...new Set(dayLines.map(l => l.slot || 'Meal'))];
     for (const slot of slots) {
       const slotItems = dayLines.filter(l => (l.slot || 'Meal') === slot);
       const orderNumber = `${sub.meta?.orderNumber || sub.id.slice(-6).toUpperCase()}-${slot}`;
-      
+      const syncToken = `sub:${sub.id}:${targetDate}:${slot}`;
+
       const subtotal = slotItems.reduce((s, i) => s + ((i.unitPriceAtOrder || 0) * (i.qty || 1)), 0);
-      const gstAmount = Math.round(subtotal * 0.05);
+      const gstAmount = Math.round(subtotal * gstRate);
       const total = subtotal + gstAmount;
 
-      const { data: order, error: orderErr } = await admin.from('orders').insert({
-        user_id: sub.user_id,
-        order_number: orderNumber,
-        customer_name: sub.customer_name,
-        delivery_details: sub.delivery_details,
-        payment_status: 'paid',
-        status: 'pending',
-        kind: 'personalized',
-        delivery_date: targetDate,
-        subtotal: subtotal,
-        gst_amount: gstAmount,
-        total: total,
-        meta: {
+      const { data: orderId, error: orderErr } = await admin.rpc('create_subscription_order_v2', {
+        p_user_id: sub.user_id,
+        p_order_number: orderNumber,
+        p_customer_name: sub.customer_name,
+        p_delivery_details: sub.delivery_details,
+        p_delivery_date: targetDate,
+        p_subtotal: subtotal,
+        p_gst_amount: gstAmount,
+        p_total: total,
+        p_sync_token: syncToken,
+        p_meta: {
           subscription_id: sub.id,
           is_auto_generated: true,
           slot: slot,
           delivery_otp: Math.floor(1000 + Math.random() * 9000).toString(),
-        }
-      }).select('id').single();
+        },
+        p_items: slotItems.map(l => ({
+          menu_item_id: l.itemId,
+          item_name: `[${slotMappings[slot] || slot}] ${l.label}`,
+          quantity: l.qty,
+          unit_price: l.unitPriceAtOrder || 0
+        }))
+      });
 
       if (orderErr) {
-        console.error(`[GEN_ORDERS] Error creating order ${orderNumber}:`, orderErr);
+        console.error(`[GEN_ORDERS] RPC Error [${orderNumber}]:`, orderErr.message);
         continue;
       }
-
-      const items = slotItems.map(l => ({
-        order_id: order.id,
-        menu_item_id: l.itemId,
-        item_name: `[${slot}] ${l.label}`,
-        quantity: l.qty,
-        unit_price: l.unitPriceAtOrder || 0
-      }));
-
-      await admin.from('order_items').insert(items);
-      createdOrders++;
+      
+      if (orderId) createdOrders++;
     }
   }
 
-  return new Response(JSON.stringify({ success: true, message: `Generated ${createdOrders} orders`, created: createdOrders }), { status: 200, headers: { ...headers, 'Content-Type': 'application/json' } });
+  // 3. Update last run date to prevent redundant triggers
+  if (createdOrders > 0) {
+    await admin.from('app_settings').upsert({ key: 'auto_order_last_run', value: targetDate });
+  }
+
+  return new Response(JSON.stringify({ success: true, message: `Created ${createdOrders} orders`, created: createdOrders }), { status: 200, headers: { ...headers, 'Content-Type': 'application/json' } });
 }
 
 async function handleUpdateCatalog(req: Request, headers: any) {
@@ -404,9 +408,13 @@ async function handleManageSubscriptions(req: Request, headers: any) {
   const authHeader = req.headers.get('Authorization');
   if (!authHeader) throw new Error('Missing authorization');
 
-  const supabaseClient = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_ANON_KEY')!, { global: { headers: { Authorization: authHeader } } });
-  const { data: { user } } = await supabaseClient.auth.getUser();
-  if (!user) throw new Error('Unauthorized');
+  const supabaseClient = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_ANON_KEY')!);
+  const { data: authData, error: authErr } = await supabaseClient.auth.getUser(authHeader.replace('Bearer ', ''));
+  if (authErr || !authData.user) {
+    console.error("Auth mismatch:", authErr?.message);
+    throw new Error(`Unauthorized: ${authErr?.message || 'No user session'}`);
+  }
+  const user = authData.user;
 
   const admin = supabaseAdmin();
   const { data: profile } = await admin.from('profiles').select('role').eq('id', user.id).single();
@@ -452,18 +460,34 @@ async function handleManageSubscriptions(req: Request, headers: any) {
   }
 
   if (action === 'delete') {
-    // Child order cleanup
-    const { data: childOrders } = await admin.from('orders').select('id').filter('meta->>subscription_id', 'eq', subscriptionId);
+    // 1. Identify child orders for this subscription
+    const { data: childOrders } = await admin
+      .from('orders')
+      .select('id')
+      .contains('meta', { subscription_id: subscriptionId });
+
     if (childOrders && childOrders.length > 0) {
       const childIds = childOrders.map((o: any) => o.id);
+      
+      // 2. Cleanup delivery assignments first (FKey constraint)
+      await admin.from('delivery_assignments').delete().in('order_id', childIds);
+      
+      // 3. Cleanup order items
       await admin.from('order_items').delete().in('order_id', childIds);
+      
+      // 4. Delete the orders
       await admin.from('orders').delete().in('id', childIds);
     }
+
+    // 5. Cleanup subscription-specific auxiliary data
     await admin.from('subscription_swaps').delete().eq('subscription_id', subscriptionId);
     await admin.from('subscription_holds').delete().eq('subscription_id', subscriptionId);
+    
+    // 6. Finally, delete the subscription itself
     const { error } = await admin.from('subscriptions').delete().eq('id', subscriptionId);
+    
     if (error) throw error;
-    return new Response(JSON.stringify({ success: true, message: 'Subscription removed' }), { status: 200, headers: { ...headers, 'Content-Type': 'application/json' } });
+    return new Response(JSON.stringify({ success: true, message: 'Subscription and all associated data removed' }), { status: 200, headers: { ...headers, 'Content-Type': 'application/json' } });
   }
 
   throw new Error('Unknown subscription action');

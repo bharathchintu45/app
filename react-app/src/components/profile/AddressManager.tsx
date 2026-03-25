@@ -1,11 +1,13 @@
 import { useState } from "react";
-import { MapPin, Plus } from "lucide-react";
-import { motion } from "framer-motion";
+import { MapPin, Plus, Map as MapIcon, LocateFixed } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "../ui/Button";
 import { Card, CardHeader, CardContent } from "../ui/Card";
 import { Input, Textarea } from "../ui/Input";
 import { SectionTitle } from "../ui/Typography";
+import { MapPicker } from "../ui/MapPicker";
 import { supabase } from "../../lib/supabase";
+import { useAppSettingString } from "../../hooks/useAppSettings";
 import type { AppUser, DeliveryDetails } from "../../types";
 
 interface AddressManagerProps {
@@ -19,6 +21,15 @@ export function AddressManager({ user, setUser }: AddressManagerProps) {
   const [addrEditIdx, setAddrEditIdx] = useState<'primary' | number | null>(null);
   const [addrMsg, setAddrMsg] = useState('');
   const [saving, setSaving] = useState(false);
+  const [showMap, setShowMap] = useState(false);
+  const [gpsStatus, setGpsStatus] = useState<string | null>(null);
+
+  const googleMapsApiKeySetting = useAppSettingString("google_maps_api_key", "");
+  const googleMapsApiKey = googleMapsApiKeySetting.value || import.meta.env.VITE_GOOGLE_MAPS_API_KEY || "";
+  
+  if (!googleMapsApiKey) {
+    console.warn('[AddressManager] No Google Maps API key found in either app_settings or .env');
+  }
 
   const showAddrMsg = (msg: string) => { setAddrMsg(msg); setTimeout(() => setAddrMsg(''), 3000); };
 
@@ -109,6 +120,27 @@ export function AddressManager({ user, setUser }: AddressManagerProps) {
     showAddrMsg('✅ Default address updated!');
   };
 
+  const detectLocation = () => {
+    if (!navigator.geolocation) {
+      setGpsStatus("❌ Geolocation not supported");
+      return;
+    }
+    setGpsStatus("📡 Detecting...");
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const newPos = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+        setAddrDraft((prev: DeliveryDetails | null) => prev ? { ...prev, lat: newPos.lat, lng: newPos.lng } : null);
+        setShowMap(true);
+        setGpsStatus("✅ Found!");
+        setTimeout(() => setGpsStatus(null), 3000);
+      },
+      () => {
+        setGpsStatus("❌ Access denied");
+        setTimeout(() => setGpsStatus(null), 3000);
+      }
+    );
+  };
+
   return (
     <Card>
       <CardHeader className="flex flex-row items-center justify-between">
@@ -130,6 +162,127 @@ export function AddressManager({ user, setUser }: AddressManagerProps) {
             addrMsg.startsWith('🗑') ? 'bg-slate-50 text-slate-600 border border-slate-200' :
             'bg-rose-50 text-rose-700 border border-rose-200'
           }`}>{addrMsg}</div>
+        )}
+
+        {(addrMode === 'add' || addrMode === 'edit') && addrDraft && (
+          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="pt-4 border-t border-slate-100">
+            <div className="p-5 rounded-2xl border-2 border-slate-200 bg-slate-50/40 space-y-5">
+              <h4 className="text-sm font-bold text-slate-800">
+                {addrMode === 'add' ? '➕ New Address' : '✏️ Edit Address'}
+              </h4>
+
+              {googleMapsApiKey && (
+                <div className="space-y-4">
+                  <div className="flex gap-2">
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      onClick={detectLocation}
+                      className="flex-1 rounded-xl bg-slate-900 text-white hover:bg-black h-10"
+                    >
+                      <LocateFixed size={16} className="mr-2" />
+                      {gpsStatus || "Use My Location"}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setShowMap(!showMap)}
+                      className="flex-1 rounded-xl border-slate-200 h-10"
+                    >
+                      <MapIcon size={16} className="mr-2" />
+                      {showMap ? "Hide Map" : "Pin on Map"}
+                    </Button>
+                  </div>
+
+                  <AnimatePresence>
+                    {showMap && (
+                      <motion.div
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: 'auto' }}
+                        exit={{ opacity: 0, height: 0 }}
+                        className="overflow-hidden"
+                      >
+                        <MapPicker
+                          apiKey={googleMapsApiKey}
+                          initialPos={addrDraft.lat && addrDraft.lng ? { lat: addrDraft.lat, lng: addrDraft.lng } : undefined}
+                          onPositionChange={(pos, comps) => {
+                            setAddrDraft((prev: DeliveryDetails | null) => prev ? ({
+                              ...prev,
+                              lat: pos.lat,
+                              lng: pos.lng,
+                              area: comps?.area || prev.area,
+                              street: comps?.street || prev.street,
+                              building: comps?.building || prev.building
+                            }) : null);
+                          }}
+                        />
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
+              )}
+
+              <div className="space-y-1.5 pt-2 border-t border-slate-100">
+                <label className="text-xs font-bold uppercase tracking-wider text-slate-500">Location Type</label>
+                <div className="flex gap-2">
+                  {(["House", "Office", "Other"] as const).map((t) => (
+                    <Button key={t} variant={addrDraft.locationType === t ? "primary" : "outline"} size="sm"
+                      onClick={() => setAddrDraft({ ...addrDraft, locationType: t })} className="flex-1">
+                      {t}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="grid sm:grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold uppercase tracking-wider text-slate-500">Receiver Name</label>
+                  <Input value={addrDraft.receiverName} onChange={(e) => setAddrDraft({ ...addrDraft, receiverName: e.target.value })} placeholder="Full name" />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold uppercase tracking-wider text-slate-500">Receiver Phone</label>
+                  <Input value={addrDraft.receiverPhone} onChange={(e) => setAddrDraft({ ...addrDraft, receiverPhone: e.target.value })} placeholder="10-digit mobile" />
+                </div>
+              </div>
+
+              <div className="grid sm:grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold uppercase tracking-wider text-slate-500">Building / Floor</label>
+                  <Input value={addrDraft.building} onChange={(e) => setAddrDraft({ ...addrDraft, building: e.target.value })} placeholder="4th Floor, Skyline Apts" />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold uppercase tracking-wider text-slate-500">Street Name</label>
+                  <Input value={addrDraft.street} onChange={(e) => setAddrDraft({ ...addrDraft, street: e.target.value })} placeholder="MG Road" />
+                </div>
+              </div>
+
+              <div className="grid sm:grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold uppercase tracking-wider text-slate-500">Area / Locality</label>
+                  <Input value={addrDraft.area} onChange={(e) => setAddrDraft({ ...addrDraft, area: e.target.value })} placeholder="Indiranagar, Bangalore" />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold uppercase tracking-wider text-slate-500">Save As (nickname)</label>
+                  <Input value={addrDraft.addressLabel} onChange={(e) => setAddrDraft({ ...addrDraft, addressLabel: e.target.value })} placeholder="e.g. Home, Office, Gym" />
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold uppercase tracking-wider text-slate-500">Delivery Instructions (optional)</label>
+                <Textarea value={addrDraft.instructions || ''} onChange={(e) => setAddrDraft({ ...addrDraft, instructions: e.target.value })}
+                  placeholder="Leave at the gate, ring bell twice..." className="resize-none" />
+              </div>
+
+              <div className="flex gap-3 pt-2">
+                <Button onClick={handleSaveAddr} disabled={saving} className="flex-1">
+                  {saving ? 'Saving…' : addrMode === 'add' ? 'Add Address' : 'Update Address'}
+                </Button>
+                <Button variant="outline" onClick={() => { setAddrMode('view'); setAddrDraft(null); }} className="flex-1">Cancel</Button>
+              </div>
+            </div>
+          </motion.div>
         )}
 
         {user.defaultDelivery?.building ? (
@@ -190,73 +343,6 @@ export function AddressManager({ user, setUser }: AddressManagerProps) {
           </div>
         )}
 
-        {(addrMode === 'add' || addrMode === 'edit') && addrDraft && (
-          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="pt-4 border-t border-slate-100">
-            <div className="p-5 rounded-2xl border-2 border-slate-200 bg-slate-50/40 space-y-5">
-              <h4 className="text-sm font-bold text-slate-800">
-                {addrMode === 'add' ? '➕ New Address' : '✏️ Edit Address'}
-              </h4>
-
-              <div className="space-y-1.5">
-                <label className="text-xs font-bold uppercase tracking-wider text-slate-500">Location Type</label>
-                <div className="flex gap-2">
-                  {(["House", "Office", "Other"] as const).map((t) => (
-                    <Button key={t} variant={addrDraft.locationType === t ? "primary" : "outline"} size="sm"
-                      onClick={() => setAddrDraft({ ...addrDraft, locationType: t })} className="flex-1">
-                      {t}
-                    </Button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="grid sm:grid-cols-2 gap-4">
-                <div className="space-y-1.5">
-                  <label className="text-xs font-bold uppercase tracking-wider text-slate-500">Receiver Name</label>
-                  <Input value={addrDraft.receiverName} onChange={(e) => setAddrDraft({ ...addrDraft, receiverName: e.target.value })} placeholder="Full name" />
-                </div>
-                <div className="space-y-1.5">
-                  <label className="text-xs font-bold uppercase tracking-wider text-slate-500">Receiver Phone</label>
-                  <Input value={addrDraft.receiverPhone} onChange={(e) => setAddrDraft({ ...addrDraft, receiverPhone: e.target.value })} placeholder="10-digit mobile" />
-                </div>
-              </div>
-
-              <div className="grid sm:grid-cols-2 gap-4">
-                <div className="space-y-1.5">
-                  <label className="text-xs font-bold uppercase tracking-wider text-slate-500">Building / Floor</label>
-                  <Input value={addrDraft.building} onChange={(e) => setAddrDraft({ ...addrDraft, building: e.target.value })} placeholder="4th Floor, Skyline Apts" />
-                </div>
-                <div className="space-y-1.5">
-                  <label className="text-xs font-bold uppercase tracking-wider text-slate-500">Street Name</label>
-                  <Input value={addrDraft.street} onChange={(e) => setAddrDraft({ ...addrDraft, street: e.target.value })} placeholder="MG Road" />
-                </div>
-              </div>
-
-              <div className="grid sm:grid-cols-2 gap-4">
-                <div className="space-y-1.5">
-                  <label className="text-xs font-bold uppercase tracking-wider text-slate-500">Area / Locality</label>
-                  <Input value={addrDraft.area} onChange={(e) => setAddrDraft({ ...addrDraft, area: e.target.value })} placeholder="Indiranagar, Bangalore" />
-                </div>
-                <div className="space-y-1.5">
-                  <label className="text-xs font-bold uppercase tracking-wider text-slate-500">Save As (nickname)</label>
-                  <Input value={addrDraft.addressLabel} onChange={(e) => setAddrDraft({ ...addrDraft, addressLabel: e.target.value })} placeholder="e.g. Home, Office, Gym" />
-                </div>
-              </div>
-
-              <div className="space-y-1.5">
-                <label className="text-xs font-bold uppercase tracking-wider text-slate-500">Delivery Instructions (optional)</label>
-                <Textarea value={addrDraft.instructions || ''} onChange={(e) => setAddrDraft({ ...addrDraft, instructions: e.target.value })}
-                  placeholder="Leave at the gate, ring bell twice..." className="resize-none" />
-              </div>
-
-              <div className="flex gap-3 pt-2">
-                <Button onClick={handleSaveAddr} disabled={saving} className="flex-1">
-                  {saving ? 'Saving…' : addrMode === 'add' ? 'Add Address' : 'Update Address'}
-                </Button>
-                <Button variant="outline" onClick={() => { setAddrMode('view'); setAddrDraft(null); }} className="flex-1">Cancel</Button>
-              </div>
-            </div>
-          </motion.div>
-        )}
       </CardContent>
     </Card>
   );

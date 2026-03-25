@@ -1,7 +1,7 @@
 import type { OrderReceipt } from "../../types";
 import { formatDateIndia, formatTimeIndia } from "../../lib/format";
 
-export function OrderLabel({ order }: { order: OrderReceipt }) {
+export function OrderLabel({ order, gstRate = 0.05 }: { order: OrderReceipt, gstRate?: number }) {
   if (!order) return null;
 
   const isPaid = order.payment?.toLowerCase().includes('paid');
@@ -80,7 +80,7 @@ export function OrderLabel({ order }: { order: OrderReceipt }) {
           </div>
           {order.priceSummary.gst > 0 && (
             <div className="flex justify-between text-[8px] font-bold">
-              <span>GST (5%)</span>
+              <span>GST ({Math.round(gstRate * 100)}%)</span>
               <span>₹{order.priceSummary.gst}</span>
             </div>
           )}

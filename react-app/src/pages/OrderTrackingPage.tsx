@@ -661,20 +661,54 @@ function OrderCard({ order, onCancel, onSupport, storeMapUrl }: { order: DbOrder
           >
             <div className="p-5 space-y-4">
               {/* Items */}
-              {order.order_items && order.order_items.length > 0 && (
-                <div className="space-y-3">
-                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Order Contents</p>
-                  {order.order_items.map((item, i) => (
-                    <div key={i} className="flex justify-between items-center p-3 rounded-2xl bg-slate-50 border border-slate-100/50">
-                      <div className="flex items-center gap-3 text-sm font-bold text-slate-800">
-                        <span className="h-6 w-6 rounded bg-white flex items-center justify-center text-[10px] border border-slate-200">{item.quantity}x</span>
-                        {item.item_name}
+              {(() => {
+                const isSub = order?.kind === 'personalized' || order?.kind === 'subscription' || (order as any).meta?.is_auto_generated;
+                const scheduleLines = (order as any).meta?.scheduleLines;
+                
+                if (isSub && scheduleLines) {
+                  const todayStr = order.delivery_date.split('T')[0]; // Ensure only YYYY-MM-DD for comparison
+                  const linesForThisOrder = scheduleLines.filter((l: any) => l.day === todayStr && l.qty > 0);
+                  
+                  if (linesForThisOrder.length > 0) {
+                    return (
+                      <div className="space-y-3">
+                        <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Order Contents</p>
+                        {linesForThisOrder.map((l: any, i: number) => (
+                          <div key={i} className="flex justify-between items-center p-3 rounded-2xl bg-slate-50 border border-slate-100/50">
+                            <div className="flex items-center gap-3 text-sm font-bold text-slate-800">
+                              <span className="h-6 w-6 rounded bg-white flex items-center justify-center text-[10px] border border-slate-200">{l.qty}x</span>
+                              <div className="flex flex-col">
+                                <span>{l.label}</span>
+                                {l.type === 'addon' && <span className="text-[9px] font-black text-amber-600 uppercase tracking-tighter">Add-On</span>}
+                              </div>
+                            </div>
+                            <span className="font-black text-slate-900 text-xs">{l.unitPriceAtOrder ? formatINR(l.unitPriceAtOrder * l.qty) : "Included"}</span>
+                          </div>
+                        ))}
                       </div>
-                      <span className="font-black text-slate-900 text-xs">{item.unit_price ? formatINR(item.unit_price * item.quantity) : "—"}</span>
+                    );
+                  }
+                }
+
+                // Fallback to order_items
+                if (order.order_items && order.order_items.length > 0) {
+                  return (
+                    <div className="space-y-3">
+                      <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Order Contents</p>
+                      {order.order_items.map((item, i) => (
+                        <div key={i} className="flex justify-between items-center p-3 rounded-2xl bg-slate-50 border border-slate-100/50">
+                          <div className="flex items-center gap-3 text-sm font-bold text-slate-800">
+                            <span className="h-6 w-6 rounded bg-white flex items-center justify-center text-[10px] border border-slate-200">{item.quantity}x</span>
+                            {item.item_name}
+                          </div>
+                          <span className="font-black text-slate-900 text-xs">{item.unit_price ? formatINR(item.unit_price * item.quantity) : "—"}</span>
+                        </div>
+                      ))}
                     </div>
-                  ))}
-                </div>
-              )}
+                  );
+                }
+                return null;
+              })()}
               {/* Delivery address */}
               {order.delivery_details?.building && (
                 <div className="pt-4 border-t border-slate-100 space-y-2">
