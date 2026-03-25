@@ -3,22 +3,19 @@ import { motion } from "framer-motion";
 import { 
   Settings, 
   RefreshCw, 
-  ShieldCheck, 
-  Play
+  ShieldCheck
 } from "lucide-react";
 import { Button } from "../ui/Button";
 import { Input } from "../ui/Input";
 import { SectionTitle } from "../ui/Typography";
 import { useAppSetting, useAppSettingNumber, useAppSettingString } from "../../hooks/useAppSettings";
-import { api } from "../../lib/api";
 import { ManualOrderTrigger } from "./ManualOrderTrigger";
 
 interface SettingsTabProps {
   showToast: (msg: string) => void;
-  fetchOrders?: () => Promise<void>;
 }
 
-export default function SettingsTab({ showToast, fetchOrders }: SettingsTabProps) {
+export default function SettingsTab({ showToast }: SettingsTabProps) {
   // Use hooks for all settings
   const chatSetting = useAppSetting("chat_enabled", true);
   const personalizedDiscount = useAppSettingNumber("personalized_plan_discount", 0);

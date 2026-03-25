@@ -34,7 +34,7 @@ export function MapPicker({ apiKey, initialPos, onPositionChange }: MapPickerPro
 
   // Load Google Maps Script
   useEffect(() => {
-    if (window.google?.maps) {
+    if ((window as any).google?.maps) {
       setIsLoaded(true);
       return;
     }

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import type { Route, AuthIntent, DashboardTab, OrderReceipt, ThreadMsg, Slot, MenuItem, PlanMap, HoldsMap, GroupCart, GroupOrderDraft, StartDateMap, TargetMap, AppUser } from "./types";
+import type { Route, AuthIntent, DashboardTab, OrderReceipt, ThreadMsg, Slot, MenuItem, PlanMap, HoldsMap } from "./types";
 import { runDevTests } from "./data/menu";
 import { getMenu } from "./hooks/useMenu";
 import { supabase } from "./lib/supabase";
@@ -543,7 +543,6 @@ export default function App() {
               setAuthIntent={setAuthIntent}
               unreadChefMessages={unreadChefMessages}
               hasActiveSubscription={!!activeSubscription || !!(user?.isPro)}
-              dashboardTab={dashboardTab}
               setDashboardTab={setDashboardTab}
             />
 

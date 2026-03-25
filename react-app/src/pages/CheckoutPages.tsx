@@ -930,19 +930,6 @@ export function CheckoutPersonalPage({
 
         setPayError("");
 
-        const deliveredItems: MenuItem[] = [];
-        for (const dk of dates) {
-          const hold = holds[dk] || { day: false, slots: {} };
-          if (hold.day) continue;
-          const dp = planMap[dk] || {};
-          for (const s of plan.allowedSlots) {
-            if (hold.slots[s]) continue;
-            const it = dp[s];
-            if (!it) continue;
-            deliveredItems.push(it);
-          }
-        }
-
         const summary = computePriceSummary(
           chargeable.items.map((x: any) => ({ price: x.price, qty: x.qty })),
           gstRate,

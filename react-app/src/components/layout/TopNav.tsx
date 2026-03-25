@@ -1,6 +1,6 @@
 import React from "react";
 import { useAppSetting } from "../../hooks/useAppSettings";
-import type { AppUser, AuthIntent, DashboardTab, Route } from "../../types";
+import type { AuthIntent, DashboardTab, Route } from "../../types";
 import { Menu, X } from "lucide-react";
 import { Button } from "../ui/Button";
 import { cn } from "../../lib/utils";
@@ -12,7 +12,6 @@ import { useUser } from "../../contexts/UserContext";
 export function TopNav({
   route,
   setRoute,
-  dashboardTab,
   setDashboardTab,
   setAuthOpen,
   setAuthIntent,
@@ -21,7 +20,6 @@ export function TopNav({
 }: {
   route: Route;
   setRoute: (r: Route) => void;
-  dashboardTab: DashboardTab;
   setDashboardTab: (t: DashboardTab) => void;
   authOpen: boolean;
   setAuthOpen: (b: boolean) => void;
