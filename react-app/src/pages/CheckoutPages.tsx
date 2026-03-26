@@ -519,7 +519,7 @@ function CheckoutCommon({
                 )}
                </div>
               
-              {!googleMapsApiKey.value && (
+              {!googleMapsApiKey && (
                 <div className="mt-4 p-3 rounded-xl bg-amber-50 border border-amber-200 text-[10px] text-amber-800 font-bold uppercase tracking-wider">
                   ⚠️ Google Maps API Key not configured by admin. Pin on map feature is disabled.
                 </div>
@@ -542,7 +542,7 @@ function CheckoutCommon({
                     {gpsStatus?.includes("Detecting") ? "Detecting..." : 
                      geoPermission === 'prompt' ? "Allow & Detect Location" : "Detect My Location"}
                   </Button>
-                  {googleMapsApiKey.value && (
+                  {googleMapsApiKey && (
                     <Button 
                       type="button"
                       variant="outline" 
@@ -582,14 +582,14 @@ function CheckoutCommon({
                   </motion.div>
                 )}
 
-                {showMap && googleMapsApiKey.value && (
+                {showMap && googleMapsApiKey && (
                   <motion.div 
                     initial={{ opacity: 0, height: 0 }} 
                     animate={{ opacity: 1, height: 'auto' }}
                     className="overflow-hidden"
                   >
                     <MapPicker 
-                      apiKey={googleMapsApiKey.value}
+                      apiKey={googleMapsApiKey}
                       initialPos={delivery.lat && delivery.lng ? { lat: delivery.lat, lng: delivery.lng } : undefined}
                       onPositionChange={(pos, comps) => {
                         setDelivery(prev => ({ 

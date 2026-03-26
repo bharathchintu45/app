@@ -258,8 +258,15 @@ export function AuthModal({
         }
       }
 
-      // If name is blank or profile genuinely didn't get inserted by the trigger:
-      if (!profile || !profile.full_name) {
+      // If missing name, or missing phone (if email auth), or missing email (if phone auth)
+      const isNameMissing = !profile || !profile.full_name || profile.full_name === 'EMPTY';
+      const isPhoneMissing = !profile || !profile.phone_number || profile.phone_number === 'EMPTY';
+      const isEmailMissing = !userEmail || userEmail === 'EMPTY';
+
+      if (isNameMissing || (authMethod === "email" && isPhoneMissing) || (authMethod === "phone" && isEmailMissing)) {
+        if (profile && !isNameMissing) {
+           setName(profile.full_name);
+        }
         setLoading(false);
         setStep("profile"); // Route them to explicit setup
         return;
@@ -305,12 +312,12 @@ export function AuthModal({
     const finalPhone = authUser.phone || `+91${phone.trim()}`;
 
     // Use UPSERT just in case the trigger genuinely failed to insert
+    // We omit 'role' so that if the profile exists, its role is preserved.
     const { error } = await supabase.from("profiles").upsert({
       id: authUser.id,
       full_name: name.trim(),
       email: finalEmail,
-      phone_number: finalPhone,
-      role: 'customer' // Safe default, portals will block access if wrong anyway.
+      phone_number: finalPhone
     });
 
     if (error) { setLoading(false); return setErrorMsg("Error saving profile: " + error.message); }

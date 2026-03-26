@@ -206,7 +206,7 @@ export function TopNav({
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               onClick={() => setMobileMenuOpen(false)}
-              className="fixed inset-0 z-[60] bg-black/10 backdrop-blur-sm md:hidden"
+              className="fixed inset-0 z-[110] bg-black/10 backdrop-blur-sm md:hidden"
             />
             
             {/* Drawer */}
@@ -215,7 +215,7 @@ export function TopNav({
               animate={{ x: 0 }}
               exit={{ x: "100%" }}
               transition={{ type: "spring", damping: 25, stiffness: 200 }}
-              className="fixed right-4 top-20 bottom-4 z-[70] w-[calc(100%-2rem)] max-w-xs rounded-3xl border border-white/40 bg-white/90 backdrop-blur-xl shadow-2xl md:hidden overflow-hidden"
+              className="fixed right-4 top-20 bottom-4 z-[120] w-[calc(100%-2rem)] max-w-xs rounded-3xl border border-white/40 bg-white/90 backdrop-blur-xl shadow-2xl md:hidden overflow-hidden"
             >
               <div className="flex h-14 items-center justify-between px-6 border-b border-black/[0.03]">
                 <div className="font-black text-slate-400 text-sm tracking-widest uppercase">Navigation</div>

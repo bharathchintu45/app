@@ -52,8 +52,8 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       if (profile) {
         const loggedInUser: AppUser = {
           id: profile.id,
-          name: profile.full_name || "Valued Customer",
-          phone: profile.phone_number || "",
+          name: (!profile.full_name || profile.full_name === 'EMPTY') ? "Valued Customer" : profile.full_name,
+          phone: (!profile.phone_number || profile.phone_number === 'EMPTY') ? "" : profile.phone_number,
           email: email || "",
           role: (profile.role as UserRole) || "customer",
           isPro: profile.is_pro || false,
