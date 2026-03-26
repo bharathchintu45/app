@@ -56,16 +56,17 @@ export default function ManagerPage({ user, onBack, showToast }: ManagerPageProp
     const today = new Date().toISOString().split('T')[0];
     const { data } = await supabase
       .from('orders')
-      .select('status')
+      .select('status, payment_status')
       .eq('delivery_date', today);
     
     if (data) {
       const s = { pending: 0, preparing: 0, ready: 0, dispatched: 0 };
       data.forEach((o: any) => {
-        if (o.status === 'New') s.pending++;
-        else if (o.status === 'Preparing') s.preparing++;
-        else if (o.status === 'Ready') s.ready++;
-        else if (o.status === 'Out for delivery') s.dispatched++;
+        if (o.payment_status === 'pending' || o.payment_status === 'failed') return; // Ignore unpaid checkout drafts
+        if (o.status === 'pending') s.pending++;
+        else if (o.status === 'preparing') s.preparing++;
+        else if (o.status === 'ready') s.ready++;
+        else if (o.status === 'out_for_delivery') s.dispatched++;
       });
       setStats(s);
     }

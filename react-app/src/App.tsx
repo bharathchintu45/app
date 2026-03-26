@@ -225,7 +225,7 @@ export default function App() {
 
         const [threadsRes, subRes, menuItems, ordersRes] = await Promise.all([
           supabase.from("chef_threads").select("*").eq("customer_id", user!.id).order("created_at", { ascending: true }),
-          supabase.from("subscriptions").select("*").eq("user_id", user!.id).eq("status", "active").maybeSingle(),
+          supabase.from("subscriptions").select("*").eq("user_id", user!.id).eq("status", "active").eq("payment_status", "paid").maybeSingle(),
           getMenu().catch(() => []),
           supabase.from("orders").select("*, order_items(*)").eq("user_id", user!.id).eq("delivery_date", todayStr).not("status", "in", '("cancelled", "delivered")').order("created_at", { ascending: false })
         ]);

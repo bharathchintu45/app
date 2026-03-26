@@ -3,14 +3,14 @@ import { Card, CardHeader, CardContent } from "../ui/Card";
 import { Input, Textarea } from "../ui/Input";
 import { Button } from "../ui/Button";
 import { SectionTitle } from "../ui/Typography";
-import { UtensilsCrossed, ArrowRight, Search, ShoppingBag, X, Minus, Plus } from "lucide-react";
+import { UtensilsCrossed, ArrowRight, Search, ShoppingBag, X, Minus, Plus, CheckCircle2, LeafyGreen } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAppSetting, useAppSettingNumber, useAppSettingString } from "../../hooks/useAppSettings";
-import { clamp, digitsOnly, formatDateIndia, dayKey } from "../../lib/format";
+import { clamp, formatDateIndia, dayKey } from "../../lib/format";
 import { SkeletonMenuCard } from "../ui/Skeleton";
 import { cn } from "../../lib/utils";
 import type { GroupOrderDraft, GroupCart, MenuItem } from "../../types";
-import { CATS } from "../../data/menu";
+import { CATS, isVeg } from "../../data/menu";
 
 function Pill({ children }: { children: React.ReactNode }) {
   return <span className="text-[10px] font-bold uppercase tracking-normal sm:tracking-widest px-2 py-0.5 rounded bg-black/5 text-black/60">{children}</span>;
@@ -48,6 +48,7 @@ export function GroupOrderView({
   const [groupSearch, setGroupSearch] = React.useState("");
   const [selectedTag, setSelectedTag] = React.useState<string | null>(null);
   const [isCartOpen, setIsCartOpen] = useState(false);
+  const [vegMode, setVegMode] = useState(false);
 
   // Handle back button to close cart drawer
   React.useEffect(() => {
@@ -129,8 +130,9 @@ export function GroupOrderView({
     return menu
       .filter((m) => m.category === groupCat)
       .filter((m) => !q || m.name.toLowerCase().includes(q))
-      .filter((m) => !selectedTag || m.tags?.includes(selectedTag));
-  }, [menu, groupCat, groupSearch, selectedTag]);
+      .filter((m) => !selectedTag || m.tags?.includes(selectedTag))
+      .filter((m) => !vegMode || isVeg(m));
+  }, [menu, groupCat, groupSearch, selectedTag, vegMode]);
 
   // Reset tag when category changes
   React.useEffect(() => {
@@ -145,12 +147,13 @@ export function GroupOrderView({
   }, [groupCart, menu]);
 
   const totalUnits = useMemo(() => Object.values(groupCart).reduce((a, b) => a + b, 0), [groupCart]);
-  const subtotal = useMemo(() => {
-    return groupCartItems.reduce((acc, { item, qty }) => {
-      const price = Math.round((item.priceINR || 0) * (1 - groupDiscount.value/100));
-      return acc + (price * qty);
-    }, 0);
-  }, [groupCartItems, groupDiscount.value]);
+  const effectiveDiscount = totalUnits > 10 ? groupDiscount.value : 0;
+
+  const { subtotal, originalTotal } = useMemo(() => {
+    const baseTotal = groupCartItems.reduce((acc, {item, qty}) => acc + (item.priceINR || 0) * qty, 0);
+    const discountAmount = baseTotal * (effectiveDiscount / 100);
+    return { subtotal: Math.round(baseTotal - discountAmount), originalTotal: baseTotal };
+  }, [groupCartItems, effectiveDiscount]);
 
   function addToGroup(item: MenuItem, delta: number) {
     const isAvailable = item.available !== false;
@@ -183,13 +186,12 @@ export function GroupOrderView({
     if (deliveryDayStr === todayStr && storeTimings.isTooLateForToday) return false;
 
     const hours = (delivery.getTime() - now.getTime()) / (1000 * 60 * 60);
-    if (groupDraft.people >= 61) return hours >= 24;
-    if (groupDraft.people >= 31) return hours >= 6;
+    if (totalUnits >= 61) return hours >= 24;
+    if (totalUnits >= 31) return hours >= 6;
     return hours >= 1;
-  }, [groupDraft.deliveryAt, groupDraft.people, storeTimings]);
+  }, [groupDraft.deliveryAt, totalUnits, storeTimings]);
 
   function goGroupCheckout() {
-    if (groupDraft.people < 2 || groupDraft.people > 100) { showToast("Group meals: people must be between 2 and 100."); return; }
     if (!groupLeadOk) { showToast("Group meals: delivery time must follow strict notice (≤30 items: 1–3 hrs, 31–60 items: 6 hrs, 61+ items: 24 hrs)."); return; }
     if (!groupCartItems.length) { showToast("Please add at least one item for the group order."); return; }
     setRoute("checkout-group");
@@ -203,31 +205,52 @@ export function GroupOrderView({
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="grid gap-4 md:grid-cols-2">
-          {/* ... Headcount & Delivery ... */}
-          <div className="rounded-2xl border border-black/10 p-3">
-            <div className="text-sm font-semibold">Headcount</div>
-            <div className="mt-2 flex items-center gap-3">
-              <Input
-                value={String(groupDraft.people)}
-                onChange={(e) => setGroupDraft((p) => ({ ...p, people: clamp(Number(digitsOnly(e.target.value) || "0"), 0, 100) }))}
-                inputMode="numeric"
-                className="max-w-[120px]"
-              />
-              <span className="text-sm text-black/55">guests (2–100)</span>
-            </div>
+          {/* Discount Banner replaces old headcount field */}
+          <div className="rounded-2xl border border-indigo-100 bg-indigo-50/50 p-4 relative overflow-hidden flex flex-col justify-center">
+            {totalUnits > 10 ? (
+              <div className="relative z-10 flex items-center justify-between">
+                <div>
+                  <div className="text-sm font-bold tracking-tight text-emerald-800">Discount Unlocked! 🎉</div>
+                  <div className="text-xs text-emerald-700/80 mt-0.5">{groupDiscount.value}% off your entire group order.</div>
+                </div>
+                <div className="h-10 w-10 shrink-0 bg-emerald-100 rounded-full flex items-center justify-center border border-emerald-200 shadow-sm">
+                  <CheckCircle2 className="w-5 h-5 text-emerald-600" />
+                </div>
+              </div>
+            ) : (
+              <div className="relative z-10">
+                <div className="text-sm font-semibold text-indigo-900 tracking-tight">Unlock Group Pricing</div>
+                <div className="text-xs text-indigo-700 mt-0.5">Add {11 - totalUnits} more items to get {groupDiscount.value}% off!</div>
+                <div className="mt-3 w-full bg-indigo-100/50 rounded-full h-1.5 overflow-hidden">
+                  <div className="bg-gradient-to-r from-indigo-500 to-indigo-400 h-full rounded-full transition-all duration-300" style={{ width: `${(totalUnits / 11) * 100}%` }} />
+                </div>
+              </div>
+            )}
+            <div className="absolute right-0 top-0 w-32 h-32 bg-indigo-200/20 blur-2xl rounded-full -mr-10 -mt-10" />
           </div>
 
           <div className="rounded-2xl border border-black/10 p-3">
             <div className="text-sm font-semibold">Delivery date & time</div>
             <div className="mt-2 space-y-2">
-              <Input type="datetime-local" value={groupDraft.deliveryAt} onChange={(e) => setGroupDraft((p) => ({ ...p, deliveryAt: e.target.value }))} className="w-full" />
+              <Input 
+                type="datetime-local" 
+                value={groupDraft.deliveryAt} 
+                onChange={(e) => setGroupDraft((p) => ({ ...p, deliveryAt: e.target.value }))} 
+                min={(() => {
+                  const now = new Date();
+                  now.setHours(now.getHours() + 1);
+                  const tzOffset = now.getTimezoneOffset() * 60000;
+                  return new Date(now.getTime() - tzOffset).toISOString().slice(0, 16);
+                })()}
+                className="w-full" 
+              />
               <div className="text-xs text-black/55">
                 Selected: {groupDraft.deliveryAt ? formatDateIndia(groupDraft.deliveryAt.split('T')[0]) + ' ' + (groupDraft.deliveryAt.split('T')[1] || '') : "Not set"}
               </div>
               <div className={cn("text-xs font-medium", groupLeadOk ? "text-slate-600" : "text-amber-700 font-bold")}>
                 {storeTimings.isTooLateForToday && groupDraft.deliveryAt && dayKey(new Date(groupDraft.deliveryAt)) === dayKey(new Date())
                   ? `⚠️ Same-day orders disabled. Cutoff was 3hrs before store closing (${storeTimings.closeTime}).`
-                  : `Notice required: ${groupDraft.people >= 61 ? "24 hrs (61+ items)" : groupDraft.people >= 31 ? "6 hrs (31-60 items)" : "1–3 hrs (≤30 items)"}`
+                  : `Notice required: ${totalUnits >= 61 ? "24 hrs (61+ items)" : totalUnits >= 31 ? "6 hrs (31-60 items)" : "1–3 hrs (≤30 items)"}`
                 }
               </div>
             </div>
@@ -250,14 +273,28 @@ export function GroupOrderView({
                 </Button>
               ))}
             </div>
-            <div className="relative flex-1 sm:max-w-[180px]">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
-              <Input 
-                value={groupSearch} 
-                onChange={(e: any) => setGroupSearch(e.target.value)} 
-                placeholder="Search items…" 
-                className="pl-10 bg-white border-slate-200 h-8 text-sm w-full" 
-              />
+            <div className="flex items-center gap-2 flex-1 sm:max-w-[240px]">
+              <div className="relative flex-1">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+                <Input 
+                  value={groupSearch} 
+                  onChange={(e: any) => setGroupSearch(e.target.value)} 
+                  placeholder="Search items…" 
+                  className="pl-10 bg-white border-slate-200 h-8 text-sm w-full" 
+                />
+              </div>
+              <button
+                onClick={() => setVegMode(!vegMode)}
+                className={cn(
+                  "flex items-center gap-1.5 h-8 px-2.5 rounded-xl border-2 text-[10px] font-black uppercase tracking-wider transition-all shrink-0",
+                  vegMode
+                    ? "border-green-500 bg-green-500 text-white shadow-md shadow-green-500/20"
+                    : "border-green-200 bg-white text-green-600 hover:border-green-400 hover:bg-green-50"
+                )}
+              >
+                <LeafyGreen size={12} />
+                Veg
+              </button>
             </div>
           </div>
 
@@ -302,14 +339,16 @@ export function GroupOrderView({
               groupFilteredMenu.map((it) => {
                 const qty = groupCart[it.id] || 0;
                 return (
-                  <div key={it.id} className="rounded-2xl border border-black/10 p-3">
-                    <div className="flex flex-col sm:flex-row sm:items-start gap-3">
-                      <div className="flex items-start gap-3 flex-1 min-w-0">
-                        <img onClick={() => setModalItem(it)} src={getItemImage(it)} alt={it.name} className="w-20 h-20 rounded-xl object-cover shrink-0 cursor-pointer shadow-sm" loading="lazy" />
-                        <div className="min-w-0 flex-1 cursor-pointer" onClick={() => setModalItem(it)}>
-                          <div className="font-bold text-sm leading-tight text-slate-900 hover:text-emerald-600 transition-colors mb-0.5">{it.name}</div>
-                          {it.description && <div className="mt-0.5 text-[11px] text-slate-500 line-clamp-2 leading-relaxed">{it.description}</div>}
-                          <div className="mt-1.5 flex flex-wrap gap-1.5 items-center">
+                  <div key={it.id} className="group/card rounded-[1.5rem] border border-white/60 bg-white/70 shadow-[0_8px_30px_rgb(0,0,0,0.04)] hover:shadow-[0_20px_40px_rgb(0,0,0,0.08)] hover:-translate-y-1 transition-all duration-300 p-3.5 relative overflow-hidden backdrop-blur-xl ring-1 ring-black/5">
+                    <div className="flex flex-col sm:flex-row sm:items-start gap-4">
+                      <div className="flex items-start gap-4 flex-1 min-w-0">
+                        <div className="relative w-24 h-24 rounded-[1.25rem] overflow-hidden shrink-0 shadow-sm ring-1 ring-black/5 cursor-pointer group-hover/card:shadow-md transition-all" onClick={() => setModalItem(it)}>
+                          <img src={getItemImage(it)} alt={it.name} className="w-full h-full object-cover group-hover/card:scale-110 transition-transform duration-700 ease-out" loading="lazy" />
+                        </div>
+                        <div className="min-w-0 flex-1 cursor-pointer pt-1" onClick={() => setModalItem(it)}>
+                          <div className="font-extrabold text-base leading-tight text-slate-900 group-hover/card:text-emerald-700 transition-colors mb-1">{it.name}</div>
+                          {it.description && <div className="text-xs text-slate-500 line-clamp-2 leading-relaxed mb-2 pr-2">{it.description}</div>}
+                          <div className="flex flex-wrap gap-1.5 items-center">
                             <Pill>{it.calories} kcal</Pill>
                             <Pill>P {it.protein}g</Pill>
                             {typeof it.priceINR === "number" && (
@@ -332,7 +371,7 @@ export function GroupOrderView({
                           <Button 
                             size="sm" 
                             variant="outline" 
-                            className="h-8 px-5 rounded-lg bg-emerald-500 text-white hover:bg-emerald-600 transition-all text-sm font-bold shadow-sm border-emerald-500 disabled:opacity-50 disabled:bg-slate-300 disabled:border-slate-300 disabled:cursor-not-allowed"
+                            className="h-9 px-6 rounded-xl bg-emerald-500 text-white hover:bg-emerald-600 transition-all text-sm font-extrabold shadow-md border-emerald-500 hover:shadow-emerald-500/20 disabled:opacity-50 disabled:bg-slate-300 disabled:border-slate-300 disabled:cursor-not-allowed group-hover/card:scale-[1.02]"
                             onClick={(e) => { e.stopPropagation(); addToGroup(it, 1); }}
                             disabled={it.available === false || (it.category === "Midday-Midnight Kitchen" && (groupDraft.deliveryAt ? new Date(groupDraft.deliveryAt).getHours() : new Date().getHours()) < 11)}
                           >
@@ -398,7 +437,14 @@ export function GroupOrderView({
                 <div className="flex items-center gap-3 sm:gap-6">
                   <div className="text-right shrink-0">
                      <div className="hidden sm:block text-[10px] font-black uppercase tracking-widest text-slate-400 mb-0.5">Total Amount</div>
-                     <div className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">₹{subtotal}</div>
+                     {effectiveDiscount > 0 ? (
+                       <div className="flex flex-col items-end">
+                         <div className="text-[10px] text-slate-400 line-through leading-none mb-0.5">₹{originalTotal}</div>
+                         <div className="text-xl sm:text-2xl font-black text-emerald-600 tracking-tight leading-none">₹{subtotal}</div>
+                       </div>
+                     ) : (
+                       <div className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">₹{subtotal}</div>
+                     )}
                   </div>
                   
                   <Button 
@@ -502,7 +548,14 @@ export function GroupOrderView({
             <div className="p-6 bg-white border-t border-slate-100 space-y-4 shadow-[0_-4px_20px_rgba(0,0,0,0.03)]">
               <div className="flex items-center justify-between mb-2">
                 <span className="text-slate-500 font-bold uppercase text-[10px] tracking-widest">Estimated Total</span>
-                <span className="text-2xl font-black text-slate-900">₹{subtotal}</span>
+                {effectiveDiscount > 0 ? (
+                   <div className="flex flex-col items-end">
+                     <div className="text-[10px] text-slate-400 line-through leading-none mb-0.5">₹{originalTotal}</div>
+                     <div className="text-2xl font-black text-emerald-600 tracking-tight leading-none">₹{subtotal}</div>
+                   </div>
+                 ) : (
+                   <span className="text-2xl font-black text-slate-900 tracking-tight">₹{subtotal}</span>
+                 )}
               </div>
               
               <Button 

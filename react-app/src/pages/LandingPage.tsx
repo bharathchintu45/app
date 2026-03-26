@@ -1,13 +1,13 @@
 import { useState, useMemo, useEffect } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import type { Route, AuthIntent, DashboardTab, Cat, MenuItem } from "../types";
-import { CATS, DURATIONS, PLAN_TYPES, buildPlanFromSubscription, subscriptionId } from "../data/menu";
+import { CATS, DURATIONS, PLAN_TYPES, buildPlanFromSubscription, subscriptionId, isVeg } from "../data/menu";
 import { useMenu } from "../hooks/useMenu";
 import { useAppSetting, useAppSettingNumber, useAppSettingString } from "../hooks/useAppSettings";
 import { Button } from "../components/ui/Button";
 import { Input } from "../components/ui/Input";
 import { clamp, getCurrentTimeIndia } from "../lib/format";
-import { Sparkles, ArrowRight, UtensilsCrossed, Check, Search, ShoppingBag, Sprout, Users, X, ChevronLeft, ChevronRight } from "lucide-react";
+import { Sparkles, ArrowRight, UtensilsCrossed, Check, Search, ShoppingBag, Sprout, Users, X, ChevronLeft, ChevronRight, LeafyGreen } from "lucide-react";
 import { MenuItemModal } from "../components/ui/MenuItemModal";
 import { cn } from "../lib/utils";
 import tfbLogoWebP from "../assets/tfb-logo.webp";
@@ -49,6 +49,7 @@ export function LandingPage({
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
   const [modalItem, setModalItem] = useState<MenuItem | null>(null);
   const [isCartDrawerOpen, setIsCartDrawerOpen] = useState(false);
+  const [vegMode, setVegMode] = useState(false);
   
   // Local state for active section (replicated from prototype's App)
   const [activeSection, setActiveSection] = useState<"regular" | "personalized" | "group">("personalized");
@@ -150,8 +151,9 @@ export function LandingPage({
     return MENU
       .filter((m: MenuItem) => m.category === regularTab)
       .filter((m: MenuItem) => !q || m.name.toLowerCase().includes(q))
-      .filter((m: MenuItem) => !selectedTag || m.tags?.includes(selectedTag));
-  }, [MENU, regularTab, regularSearch, selectedTag]);
+      .filter((m: MenuItem) => !selectedTag || m.tags?.includes(selectedTag))
+      .filter((m: MenuItem) => !vegMode || isVeg(m));
+  }, [MENU, regularTab, regularSearch, selectedTag, vegMode]);
 
   // Reset tag when category changes
   useEffect(() => {
@@ -588,14 +590,28 @@ export function LandingPage({
                     );
                   })}
                 </div>
-                <div className="relative sm:max-w-[200px] w-full">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
-                  <Input 
-                    value={regularSearch} 
-                    onChange={(e: any) => setRegularSearch(e.target.value)} 
-                    placeholder="Search items…" 
-                    className="pl-10 h-10 bg-white border-slate-200" 
-                  />
+                <div className="flex items-center gap-2 sm:max-w-[280px] w-full">
+                  <div className="relative flex-1">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+                    <Input 
+                      value={regularSearch} 
+                      onChange={(e: any) => setRegularSearch(e.target.value)} 
+                      placeholder="Search items…" 
+                      className="pl-10 h-10 bg-white border-slate-200 w-full" 
+                    />
+                  </div>
+                  <button
+                    onClick={() => setVegMode(!vegMode)}
+                    className={cn(
+                      "flex items-center gap-1.5 h-10 px-3 rounded-xl border-2 text-xs font-black uppercase tracking-wider transition-all shrink-0",
+                      vegMode
+                        ? "border-green-500 bg-green-500 text-white shadow-md shadow-green-500/20"
+                        : "border-green-200 bg-white text-green-600 hover:border-green-400 hover:bg-green-50"
+                    )}
+                  >
+                    <LeafyGreen size={14} />
+                    Veg
+                  </button>
                 </div>
               </div>
 
@@ -662,7 +678,14 @@ export function LandingPage({
           >
             <div className="mx-auto max-w-4xl w-full pointer-events-auto">
               <div 
-                onClick={() => setIsCartDrawerOpen(true)}
+                onClick={() => {
+                  if (!user) {
+                    setAuthIntent("regular");
+                    setAuthOpen(true);
+                    return;
+                  }
+                  setIsCartDrawerOpen(true);
+                }}
                 className="group cursor-pointer rounded-[2rem] border border-white/40 bg-white shadow-[0_30px_60px_-15px_rgba(0,0,0,0.25)] backdrop-blur-2xl overflow-hidden ring-1 ring-black/5"
               >
                 <div className="p-2 sm:p-4 flex items-center justify-between gap-2 sm:gap-4">
@@ -696,7 +719,15 @@ export function LandingPage({
                     </div>
                     
                     <Button 
-                      onClick={(e) => { e.stopPropagation(); setIsCartDrawerOpen(true); }} 
+                      onClick={(e) => { 
+                        e.stopPropagation(); 
+                        if (!user) {
+                          setAuthIntent("regular");
+                          setAuthOpen(true);
+                          return;
+                        }
+                        setIsCartDrawerOpen(true); 
+                      }} 
                       size="lg" 
                       className="h-11 sm:h-14 px-5 sm:px-10 rounded-full bg-slate-950 text-white hover:bg-black transition-all shadow-xl shadow-slate-950/20 text-xs sm:text-sm font-black flex items-center gap-2 group"
                     >

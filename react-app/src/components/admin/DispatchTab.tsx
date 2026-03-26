@@ -40,6 +40,8 @@ export default function DispatchTab({ showToast }: { showToast: (msg: string) =>
       .from('orders')
       .select('id, order_number, customer_name, status, delivery_details, created_at, kind')
       .in('status', ['pending', 'preparing', 'ready', 'out_for_delivery'])
+      .neq('payment_status', 'pending')
+      .neq('payment_status', 'failed')
       .order('created_at', { ascending: false });
 
     if (qOrders) setOrders(qOrders);

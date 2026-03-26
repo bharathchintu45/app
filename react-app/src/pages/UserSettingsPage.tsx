@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   User, Sparkles, Settings, LogOut,
-  Package, Star, TrendingUp, Shield, AlertTriangle,
+  Package, Star, TrendingUp, Shield, AlertTriangle, ShieldCheck,
   Clock, Zap,
   Bell, MapPin, Activity, ArrowRight,
   Calendar
@@ -47,11 +47,12 @@ export function UserSettingsPage({
     if (!user?.id) { setOrdersLoading(false); return; }
     setOrdersLoading(true);
     
-    // Fetch orders and items (limit 25 for performance)
     const { data: dbOrders, error } = await supabase
       .from('orders')
       .select('*, order_items(*)')
       .eq('user_id', user.id)
+      .neq('payment_status', 'pending')
+      .neq('payment_status', 'failed')
       .order('created_at', { ascending: false })
       .limit(25);
 
@@ -121,6 +122,7 @@ export function UserSettingsPage({
       .select('*')
       .eq('user_id', user.id)
       .in('status', ['active', 'paused', 'pending'])
+      .eq('payment_status', 'paid')
       .order('created_at', { ascending: false })
       .limit(1)
       .maybeSingle();
@@ -458,6 +460,35 @@ export function UserSettingsPage({
                         </div>
                       </div>
                     </div>
+
+                    {/* Master PIN Delivery Card */}
+                    {activeSub.meta?.delivery_otp && (
+                      <div className="relative overflow-hidden rounded-[2rem] bg-gradient-to-br from-indigo-600 via-violet-600 to-purple-700 p-6 shadow-2xl shadow-indigo-900/10 border border-indigo-400/30 mb-8 mt-2">
+                        <div className="pointer-events-none absolute -top-12 -right-12 w-48 h-48 bg-white/10 rounded-full blur-3xl" />
+                        
+                        <div className="relative flex flex-col md:flex-row items-center justify-between gap-6">
+                          <div className="flex items-center gap-4 w-full md:w-auto">
+                            <div className="w-12 h-12 md:w-14 md:h-14 rounded-2xl bg-white/20 flex items-center justify-center backdrop-blur-sm border border-white/30 shrink-0 shadow-inner">
+                              <ShieldCheck size={28} className="text-white drop-shadow-md" />
+                            </div>
+                            <div>
+                              <p className="text-[10px] md:text-xs font-black uppercase tracking-[0.2em] text-indigo-100 mb-1 drop-shadow-sm">Master Delivery PIN</p>
+                              <p className="text-xs md:text-sm font-medium text-indigo-50 leading-relaxed max-w-sm">
+                                Share this with your driver on delivery. This same secure PIN is used for <strong className="text-white font-black">ALL deliveries</strong> throughout your subscription.
+                              </p>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-2 shrink-0 w-full md:w-auto mt-2 md:mt-0 justify-between md:justify-start">
+                            {String(activeSub.meta.delivery_otp).split('').map((digit, i) => (
+                              <div key={i} className="w-12 sm:w-14 h-14 sm:h-16 rounded-[1.25rem] bg-white/20 backdrop-blur-md border border-white/40 flex items-center justify-center shadow-lg shadow-black/10">
+                                <span className="text-3xl sm:text-4xl font-black text-white tracking-tight drop-shadow-md">{digit}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    )}
 
                     {/* 2. STATS GRID */}
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4">

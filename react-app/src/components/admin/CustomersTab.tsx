@@ -44,10 +44,12 @@ export default function CustomersTab({ showToast }: CustomersTabProps) {
       supabase.from('orders')
         .select('id, total, kind, status, created_at, customer_name, delivery_details, order_items(item_name, quantity, unit_price)')
         .neq('status', 'cancelled')
+        .neq('payment_status', 'pending')
+        .neq('payment_status', 'failed')
         .gte('created_at', sixMonthsAgo)
         .order('created_at', { ascending: false }),
       supabase.from('subscriptions')
-        .select('id, status, customer_name, delivery_details, plan_name, start_date, end_date')
+        .select('id, status, payment_status, customer_name, delivery_details, plan_name, start_date, end_date')
         .or(`status.eq.active,end_date.gte.${sixMonthsAgo}`)
     ]);
 
@@ -122,7 +124,7 @@ export default function CustomersTab({ showToast }: CustomersTabProps) {
         });
       }
       const c = custMap.get(key);
-      if (s.status === 'active') c.activeSub = true;
+      if (s.status === 'active' && s.payment_status === 'paid') c.activeSub = true;
       c.orders.push({ ...s, isSubRecord: true, created_at: s.start_date });
     });
 

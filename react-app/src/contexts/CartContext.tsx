@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
 import type { GroupCart, GroupOrderDraft } from '../types';
 
 interface CartContextType {
@@ -91,14 +91,16 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     });
   }, []);
 
+  const value = useMemo(() => ({
+    regularCart, setRegularCart,
+    groupCart, setGroupCart,
+    groupDraft, setGroupDraft,
+    addToRegularCart, removeFromRegularCart, clearRegularCart,
+    updateGroupCart
+  }), [regularCart, groupCart, groupDraft, addToRegularCart, removeFromRegularCart, clearRegularCart, updateGroupCart]);
+
   return (
-    <CartContext.Provider value={{ 
-      regularCart, setRegularCart, 
-      groupCart, setGroupCart, 
-      groupDraft, setGroupDraft,
-      addToRegularCart, removeFromRegularCart, clearRegularCart,
-      updateGroupCart
-    }}>
+    <CartContext.Provider value={value}>
       {children}
     </CartContext.Provider>
   );

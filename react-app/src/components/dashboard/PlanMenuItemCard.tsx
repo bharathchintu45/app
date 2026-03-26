@@ -42,9 +42,16 @@ export const PlanMenuItemCard = React.memo(({
               <Pill>{it.calories} kcal</Pill>
               <Pill>P{it.protein}g</Pill>
               {price !== null && (
-                <span className="text-[9px] font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded shadow-sm border border-emerald-100">
-                  ₹{price}
-                </span>
+                <div className="flex items-center gap-1">
+                  {personalizedDiscount > 0 && typeof it.priceINR === 'number' && (
+                    <span className="text-[9px] line-through text-slate-400">
+                      ₹{it.priceINR}
+                    </span>
+                  )}
+                  <span className="text-[9px] font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded shadow-sm border border-emerald-100">
+                    ₹{price}
+                  </span>
+                </div>
               )}
             </div>
           </div>
@@ -54,9 +61,16 @@ export const PlanMenuItemCard = React.memo(({
             <Pill>{it.calories} kcal</Pill>
             <Pill>P{it.protein}g</Pill>
             {price !== null && (
-              <span className="text-[9px] font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded shadow-sm border border-emerald-100">
-                ₹{price}
-              </span>
+              <div className="flex items-center gap-1">
+                {personalizedDiscount > 0 && typeof it.priceINR === 'number' && (
+                  <span className="text-[9px] line-through text-slate-400">
+                    ₹{it.priceINR}
+                  </span>
+                )}
+                <span className="text-[9px] font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded shadow-sm border border-emerald-100">
+                  ₹{price}
+                </span>
+              </div>
             )}
           </div>
           <Button 

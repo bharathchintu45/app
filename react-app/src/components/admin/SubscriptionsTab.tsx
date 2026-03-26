@@ -9,7 +9,13 @@ import {
   Pause, 
   Play, 
   Archive, 
-  X
+  X,
+  Download,
+  FileText,
+  Edit2,
+  CheckCircle2,
+  AlertCircle,
+  Save
 } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import { Button } from "../ui/Button";
@@ -30,6 +36,11 @@ export default function SubscriptionsTab({ showToast, fetchOrders }: Subscriptio
   const [subsLoading, setSubsLoading] = useState(true);
   const [subSearchQuery, setSubSearchQuery] = useState("");
   const [subFilterType, setSubFilterType] = useState<'all' | 'active' | 'expired'>('active');
+
+  // Detailed Modal State
+  const [selectedSub, setSelectedSub] = useState<any>(null);
+  const [editMode, setEditMode] = useState(false);
+  const [draftSub, setDraftSub] = useState<any>(null);
 
   // Manual Sub State
   const [manualSubOpen, setManualSubOpen] = useState(false);
@@ -153,6 +164,56 @@ export default function SubscriptionsTab({ showToast, fetchOrders }: Subscriptio
     }
   }
 
+  const filteredSubs = subscriptions
+    .filter(sub => {
+      if (subFilterType === 'active') return sub.status === 'active';
+      if (subFilterType === 'expired') return sub.status !== 'active';
+      return true;
+    })
+    .filter(sub => {
+      if (!subSearchQuery) return true;
+      const q = subSearchQuery.toLowerCase();
+      const delivery = sub.delivery_details || {};
+      return (
+        (sub.customer_name || '').toLowerCase().includes(q) ||
+        (delivery.receiverName || '').toLowerCase().includes(q) ||
+        (delivery.receiverPhone || '').includes(q) ||
+        sub.id.toLowerCase().includes(q)
+      );
+    });
+
+  function exportCSV() {
+    if (filteredSubs.length === 0) {
+      showToast("No subscriptions to export.");
+      return;
+    }
+    const headers = ["ID", "Customer Name", "Phone", "Status", "Plan", "Duration", "Start Date", "End Date", "Delivery Address", "Total Paid"];
+    const rows = filteredSubs.map(s => {
+      const d = s.delivery_details || {};
+      const fullAddr = `${d.building || ''} ${d.street || ''} ${d.area || ''}`.trim();
+      return [
+        s.id,
+        `"${s.customer_name || d.receiverName || ''}"`,
+        `"${d.receiverPhone || ''}"`,
+        s.status,
+        `"${s.plan_name || ''}"`,
+        s.duration_days,
+        s.start_date,
+        s.end_date,
+        `"${fullAddr}"`,
+        s.total || 0
+      ].join(",");
+    });
+    const csvContent = "data:text/csv;charset=utf-8," + [headers.join(","), ...rows].join("\n");
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", `subscriptions_export_${new Date().toISOString().slice(0,10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  }
+
   async function handleManualSub(e: React.FormEvent) {
     e.preventDefault();
     if (!msName || !msEmail) { showToast("Please fill details"); return; }
@@ -213,6 +274,25 @@ export default function SubscriptionsTab({ showToast, fetchOrders }: Subscriptio
       fetchSubscriptions();
     }
     setMsLoading(false);
+  }
+
+  async function handleSaveSubEdits() {
+    if (!draftSub) return;
+    const { error } = await supabase.from('subscriptions').update({
+      customer_name: draftSub.customer_name,
+      plan_name: draftSub.plan_name,
+      delivery_details: draftSub.delivery_details
+    }).eq('id', draftSub.id);
+    
+    if (error) { 
+      showToast("Error updating details: " + error.message); 
+      return; 
+    }
+    
+    showToast("Subscription updated successfully!");
+    setEditMode(false);
+    setSelectedSub(draftSub);
+    fetchSubscriptions();
   }
 
   async function handleFutureOrder(e: React.FormEvent) {
@@ -311,6 +391,9 @@ export default function SubscriptionsTab({ showToast, fetchOrders }: Subscriptio
             <Button size="sm" onClick={() => setFutureOrderOpen(true)} className="bg-indigo-600 hover:bg-indigo-700 text-xs py-1 h-9 rounded-xl">
               <CalendarDays size={14} className="mr-1" /> Future Order
             </Button>
+            <Button size="sm" onClick={exportCSV} variant="outline" className="text-xs py-1 h-9 rounded-xl border-slate-200">
+              <Download size={14} className="mr-1" /> Export CSV
+            </Button>
           </div>
         </CardHeader>
         <CardContent className="pt-8">
@@ -318,42 +401,35 @@ export default function SubscriptionsTab({ showToast, fetchOrders }: Subscriptio
             {subsLoading ? (
               Array.from({ length: 4 }).map((_, i) => <SkeletonTableRow key={i} />)
             ) : (
-              subscriptions
-                .filter(sub => {
-                  if (subFilterType === 'active') return sub.status === 'active';
-                  if (subFilterType === 'expired') return sub.status !== 'active';
-                  return true;
-                })
-                .filter(sub => {
-                  if (!subSearchQuery) return true;
-                  const q = subSearchQuery.toLowerCase();
-                  const delivery = sub.delivery_details || {};
-                  return (
-                    (sub.customer_name || '').toLowerCase().includes(q) ||
-                    (delivery.receiverName || '').toLowerCase().includes(q) ||
-                    (delivery.receiverPhone || '').includes(q) ||
-                    sub.id.toLowerCase().includes(q)
-                  );
-                })
-                .map((sub) => {
+              filteredSubs.map((sub) => {
                   const today = new Date();
                   const startDate = new Date(sub.start_date);
                   const daysPassed = Math.max(0, Math.floor((today.getTime() - startDate.getTime()) / 86400000));
                   const daysLeft = Math.max(0, sub.duration_days - daysPassed);
                   const progress = Math.min(100, Math.round((daysPassed / sub.duration_days) * 100));
                   const delivery = sub.delivery_details || {};
+                  
+                  let needsAttention = false;
+                  if (sub.schedule && Array.isArray(sub.schedule)) {
+                    needsAttention = sub.schedule.some((s: any) => s.label?.includes('Pending'));
+                  }
 
                   return (
-                    <div key={sub.id} className="flex flex-col lg:flex-row lg:items-center gap-6 p-6 rounded-2xl border border-slate-100 bg-white hover:shadow-md transition-all group">
+                    <div 
+                      key={sub.id} 
+                      onClick={() => { setSelectedSub(sub); setDraftSub(JSON.parse(JSON.stringify(sub))); setEditMode(false); }}
+                      className="flex flex-col lg:flex-row lg:items-center gap-6 p-6 rounded-2xl border border-slate-100 bg-white hover:shadow-md hover:border-emerald-200 transition-all group cursor-pointer"
+                    >
                       <div className="flex-1 flex items-center gap-4">
                         <div className="h-12 w-12 rounded-xl bg-slate-100 flex items-center justify-center text-slate-400 group-hover:bg-emerald-100 group-hover:text-emerald-600 transition-colors">
                           <Users size={24} />
                         </div>
                         <div className="flex-1">
                           <div className="text-base font-black text-slate-900">{sub.customer_name || delivery.receiverName || 'Unknown'}</div>
-                          <div className="text-xs font-bold text-slate-400 flex items-center gap-2">
+                          <div className="text-xs font-bold text-slate-400 flex items-center gap-2 mt-1">
                             {delivery.receiverPhone} <span className="text-slate-200">•</span> {sub.plan_name}
                             {sub.status === 'paused' && <span className="bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full text-[10px] font-black">PAUSED</span>}
+                            {needsAttention && <span className="bg-rose-100 text-rose-700 px-2 py-0.5 rounded-full text-[10px] font-black flex items-center gap-1"><AlertCircle size={10}/> ACTION NEEDED</span>}
                           </div>
                           <div className="text-[10px] text-slate-500 mt-1">{delivery.building} {delivery.street} {delivery.area}</div>
                           {sub.schedule?.length > 0 && (
@@ -389,7 +465,7 @@ export default function SubscriptionsTab({ showToast, fetchOrders }: Subscriptio
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-3">
+                      <div className="flex items-center gap-3" onClick={e => e.stopPropagation()}>
                         <div className="flex items-center bg-slate-100 rounded-xl px-2 h-9 border border-slate-200">
                           <input type="number" defaultValue="7" id={`days-${sub.id}`} className="w-8 bg-transparent text-xs font-bold text-center focus:outline-none" />
                           <button onClick={() => {
@@ -504,6 +580,131 @@ export default function SubscriptionsTab({ showToast, fetchOrders }: Subscriptio
                   <Button type="submit" disabled={foLoading} className="flex-1 bg-indigo-600 hover:bg-indigo-700">{foLoading ? 'Saving...' : 'Place Order'}</Button>
                 </div>
               </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Detailed Subscription Modal */}
+      <AnimatePresence>
+        {selectedSub && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setSelectedSub(null)} className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm" />
+            <motion.div initial={{ opacity: 0, scale: 0.95, y: 10 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95 }} className="relative w-full max-w-4xl bg-white rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+              {/* Header */}
+              <div className="bg-slate-50 border-b border-slate-100 p-6 flex items-start justify-between shrink-0">
+                <div>
+                  <div className="flex items-center gap-3 mb-1">
+                    <h2 className="text-2xl font-black text-slate-900">{selectedSub.customer_name || selectedSub.delivery_details?.receiverName}</h2>
+                    <span className={`px-2.5 py-1 rounded-full text-[10px] font-black tracking-widest uppercase ${selectedSub.status === 'active' ? 'bg-emerald-100 text-emerald-700' : selectedSub.status === 'paused' ? 'bg-amber-100 text-amber-700' : 'bg-slate-200 text-slate-600'}`}>
+                      {selectedSub.status}
+                    </span>
+                  </div>
+                  <p className="text-sm font-bold text-slate-500">{selectedSub.id}</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button variant="outline" size="sm" onClick={() => setEditMode(!editMode)} className={editMode ? "bg-indigo-50 text-indigo-600 border-indigo-200" : ""}>
+                    <Edit2 size={14} className="mr-1.5" /> {editMode ? 'Cancel Edit' : 'Edit Details'}
+                  </Button>
+                  <button onClick={() => setSelectedSub(null)} className="w-8 h-8 rounded-full bg-slate-200 flex items-center justify-center hover:bg-slate-300 transition-colors"><X size={16} /></button>
+                </div>
+              </div>
+
+              {/* Body */}
+              <div className="flex-1 overflow-y-auto p-6 bg-slate-50 custom-scrollbar">
+                <div className="grid md:grid-cols-3 gap-6">
+                  {/* Left Column: Info & editing */}
+                  <div className="md:col-span-1 space-y-4">
+                    <Card className="shadow-sm border-slate-200">
+                      <CardHeader className="py-4 border-b border-slate-100 bg-white"><h3 className="font-black text-sm text-slate-800 flex items-center gap-2"><UserPlus size={16} className="text-slate-400"/> Delivery & Plan</h3></CardHeader>
+                      <CardContent className="p-4 space-y-4 bg-white">
+                        {editMode ? (
+                          <div className="space-y-3">
+                            <div><label className="text-[10px] font-bold text-slate-400 uppercase">Customer Name</label><Input value={draftSub?.customer_name || ''} onChange={e => setDraftSub({...draftSub, customer_name: e.target.value})} className="h-8 text-sm" /></div>
+                            <div><label className="text-[10px] font-bold text-slate-400 uppercase">Plan Name</label><Input value={draftSub?.plan_name || ''} onChange={e => setDraftSub({...draftSub, plan_name: e.target.value})} className="h-8 text-sm" /></div>
+                            <div><label className="text-[10px] font-bold text-slate-400 uppercase">Receiver Phone</label><Input value={draftSub?.delivery_details?.receiverPhone || ''} onChange={e => setDraftSub({...draftSub, delivery_details: {...draftSub.delivery_details, receiverPhone: e.target.value}})} className="h-8 text-sm" /></div>
+                            <div><label className="text-[10px] font-bold text-slate-400 uppercase">Building</label><Input value={draftSub?.delivery_details?.building || ''} onChange={e => setDraftSub({...draftSub, delivery_details: {...draftSub.delivery_details, building: e.target.value}})} className="h-8 text-sm" /></div>
+                            <div><label className="text-[10px] font-bold text-slate-400 uppercase">Street</label><Input value={draftSub?.delivery_details?.street || ''} onChange={e => setDraftSub({...draftSub, delivery_details: {...draftSub.delivery_details, street: e.target.value}})} className="h-8 text-sm" /></div>
+                            <div><label className="text-[10px] font-bold text-slate-400 uppercase">Area</label><Input value={draftSub?.delivery_details?.area || ''} onChange={e => setDraftSub({...draftSub, delivery_details: {...draftSub.delivery_details, area: e.target.value}})} className="h-8 text-sm" /></div>
+                            <Button onClick={handleSaveSubEdits} className="w-full h-8 text-xs bg-indigo-600 hover:bg-indigo-700 mt-2"><Save size={14} className="mr-1.5"/> Save Changes</Button>
+                          </div>
+                        ) : (
+                          <div className="space-y-3">
+                            <div><p className="text-[10px] font-bold text-slate-400 uppercase">Plan Name</p><p className="text-sm font-bold text-slate-700">{selectedSub.plan_name}</p></div>
+                            <div><p className="text-[10px] font-bold text-slate-400 uppercase">Duration</p><p className="text-sm font-bold text-slate-700">{selectedSub.duration_days} Days ({formatDateIndia(selectedSub.start_date)} to {formatDateIndia(selectedSub.end_date)})</p></div>
+                            <div><p className="text-[10px] font-bold text-slate-400 uppercase">Phone</p><p className="text-sm font-bold text-slate-700">{selectedSub.delivery_details?.receiverPhone || '-'}</p></div>
+                            <div><p className="text-[10px] font-bold text-slate-400 uppercase">Address</p><p className="text-sm font-bold text-slate-700">{selectedSub.delivery_details?.building} {selectedSub.delivery_details?.street} {selectedSub.delivery_details?.area}</p></div>
+                          </div>
+                        )}
+                      </CardContent>
+                    </Card>
+
+                    <Card className="shadow-sm border-slate-200">
+                      <CardHeader className="py-4 border-b border-slate-100 bg-white"><h3 className="font-black text-sm text-slate-800 flex items-center gap-2"><FileText size={16} className="text-slate-400"/> Financial & Targets</h3></CardHeader>
+                      <CardContent className="p-4 space-y-4 bg-white">
+                        <div className="flex justify-between items-center pb-3 border-b border-slate-50">
+                          <p className="text-xs font-bold text-slate-500">Total Paid</p>
+                          <p className="text-lg font-black text-emerald-600">₹{selectedSub.total || 0}</p>
+                        </div>
+                        <div className="flex justify-between items-center pb-3 border-b border-slate-50">
+                          <p className="text-xs font-bold text-slate-500">Payment Status</p>
+                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-widest ${selectedSub.payment_status === 'paid' ? 'bg-emerald-50 text-emerald-600 border border-emerald-100' : 'bg-rose-50 text-rose-600 border border-rose-100'}`}>
+                            {selectedSub.payment_status}
+                          </span>
+                        </div>
+                        {selectedSub.targets && Object.keys(selectedSub.targets).length > 0 && (
+                          <div>
+                            <p className="text-xs font-bold text-slate-500 mb-2">Target Macros</p>
+                            <div className="flex flex-wrap gap-2">
+                              {selectedSub.targets.calories && <span className="bg-slate-100 text-slate-600 px-2 py-1 rounded text-xs font-black">{selectedSub.targets.calories} kcal</span>}
+                              {selectedSub.targets.protein && <span className="bg-slate-100 text-slate-600 px-2 py-1 rounded text-xs font-black">P: {selectedSub.targets.protein}g</span>}
+                              {selectedSub.targets.carbs && <span className="bg-slate-100 text-slate-600 px-2 py-1 rounded text-xs font-black">C: {selectedSub.targets.carbs}g</span>}
+                              {selectedSub.targets.fat && <span className="bg-slate-100 text-slate-600 px-2 py-1 rounded text-xs font-black">F: {selectedSub.targets.fat}g</span>}
+                            </div>
+                          </div>
+                        )}
+                      </CardContent>
+                    </Card>
+                  </div>
+
+                  {/* Right Column: Full Schedule */}
+                  <div className="md:col-span-2">
+                    <Card className="shadow-sm border-slate-200 h-full flex flex-col max-h-[500px]">
+                      <CardHeader className="py-4 border-b border-slate-100 bg-white shrink-0"><h3 className="font-black text-sm text-slate-800 flex items-center gap-2"><CalendarDays size={16} className="text-slate-400"/> Full Schedule ({selectedSub.schedule?.length || 0} Slots)</h3></CardHeader>
+                      <CardContent className="p-0 flex-1 overflow-y-auto bg-slate-50 custom-scrollbar">
+                        {(!selectedSub.schedule || selectedSub.schedule.length === 0) ? (
+                          <div className="p-8 text-center text-slate-400 font-bold text-sm">No schedule available.</div>
+                        ) : (
+                          <div className="divide-y divide-slate-100">
+                            {selectedSub.schedule.map((item: any, idx: number) => {
+                              const isPending = item.label?.includes('Pending');
+                              return (
+                                <div key={idx} className="p-3 bg-white hover:bg-slate-50 transition-colors flex items-center justify-between">
+                                  <div className="flex items-center gap-4">
+                                    <div className="w-12 text-center">
+                                      <div className="text-[10px] font-black uppercase text-slate-400">{item.day.slice(0,3)}</div>
+                                      <div className="text-xs font-bold text-slate-700">{item.slot}</div>
+                                    </div>
+                                    <div className={`h-8 w-1 rounded-full ${isPending ? 'bg-amber-300' : 'bg-emerald-400'}`} />
+                                    <div>
+                                      <div className={`text-sm font-bold ${isPending ? 'text-amber-600' : 'text-slate-900'} flex items-center gap-2`}>
+                                        {item.label}
+                                        {isPending && <AlertCircle size={12} className="text-amber-500" />}
+                                        {!isPending && <CheckCircle2 size={12} className="text-emerald-500" />}
+                                      </div>
+                                      <div className="text-[10px] font-bold text-slate-400 mt-0.5">Qty: {item.qty} {item.itemId ? `• ID: ${item.itemId.slice(0,8)}` : ''}</div>
+                                    </div>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </CardContent>
+                    </Card>
+                  </div>
+                </div>
+              </div>
             </motion.div>
           </div>
         )}

@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
 import type { HoldsMap, PlanMap, StartDateMap, TargetMap } from '../types';
 import type { SlotAddons } from '../components/dashboard/AddonPopup';
 
@@ -118,16 +118,18 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
     localStorage.removeItem("tfb_subscription");
   }, []);
 
+  const value = useMemo(() => ({
+    holds, setHolds,
+    planMap, setPlanMap,
+    startDates, setStartDates,
+    targetMap, setTargetMap,
+    subscription, setSubscription,
+    dateSlotAddons, setDateSlotAddons,
+    clearPlanningState
+  }), [holds, planMap, startDates, targetMap, subscription, dateSlotAddons, clearPlanningState]);
+
   return (
-    <PlanContext.Provider value={{ 
-      holds, setHolds, 
-      planMap, setPlanMap, 
-      startDates, setStartDates, 
-      targetMap, setTargetMap,
-      subscription, setSubscription,
-      dateSlotAddons, setDateSlotAddons,
-      clearPlanningState
-    }}>
+    <PlanContext.Provider value={value}>
       {children}
     </PlanContext.Provider>
   );

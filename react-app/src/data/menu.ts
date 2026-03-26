@@ -2,6 +2,12 @@ import type { MenuItem, PlanConfig, PlanType, Duration, Macros } from "../types"
 
 export const CATS = ["All-Day Kitchen", "Midday-Midnight Kitchen", "Add-Ons"] as const;
 
+const NON_VEG_KEYWORDS = ["chicken", "fish", "egg", "mutton", "prawn", "shrimp", "meat", "lamb", "pork", "bacon", "beef", "keema"];
+export function isVeg(item: MenuItem): boolean {
+  const n = item.name.toLowerCase();
+  return !NON_VEG_KEYWORDS.some(kw => n.includes(kw));
+}
+
 export const PLAN_TYPES: { key: PlanType; title: string; slots: import("../types").Slot[]; maxMeals: number }[] = [
   { key: "1meal", title: "1 meal/day", slots: ["Slot1", "Slot2", "Slot3"], maxMeals: 1 },
   { key: "2meals", title: "2 meals/day", slots: ["Slot1", "Slot2", "Slot3"], maxMeals: 2 },

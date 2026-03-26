@@ -1,0 +1,14 @@
+{
+  "subResult": {
+    "code": "23514",
+    "details": "Failing row contains (4ebe18e4-8537-46c8-9706-cc4f6c9e7ce0, 2026-03-26 05:51:55.324206+00, null, cf490f18-d7f8-48f6-9fd2-5a6b71994496, pending, subscription, paid, 0, 0, 0, 2026-03-26, null, null, test, null, null, null, null, 0, null).",
+    "hint": null,
+    "message": "new row for relation \"orders\" violates check constraint \"orders_kind_check\""
+  },
+  "SubResult": {
+    "code": "23514",
+    "details": "Failing row contains (eef39b65-6555-4d85-bb21-7f43ca689d3d, 2026-03-26 05:51:55.768931+00, null, cf490f18-d7f8-48f6-9fd2-5a6b71994496, pending, Subscription, paid, 0, 0, 0, 2026-03-26, null, null, test, null, null, null, null, 0, null).",
+    "hint": null,
+    "message": "new row for relation \"orders\" violates check constraint \"orders_kind_check\""
+  }
+}

@@ -121,13 +121,22 @@ export default function AnalyticsTab({ showToast }: AnalyticsTabProps) {
     thirtyDaysAgo.setDate(today.getDate() - 30);
     const fetchStartStr = (new Date(Math.min(previousPeriodStart.getTime(), thirtyDaysAgo.getTime()))).toISOString();
 
-    const { data } = await supabase
+    const { data: orderData } = await supabase
       .from('orders')
       .select('id, order_number, total, kind, payment_status, status, created_at, customer_name, delivery_date, delivery_details, meta, order_items(item_name, quantity, unit_price)')
       .neq('status', 'cancelled')
+      .neq('payment_status', 'pending')
+      .neq('payment_status', 'failed')
       .gte('created_at', fetchStartStr)
       .lte('created_at', analyticsRange === 'custom' ? customRange.end + 'T23:59:59Z' : today.toISOString())
       .order('created_at', { ascending: false });
+
+    const { data: subRevData } = await supabase
+      .from('subscriptions')
+      .select('id, total, plan_name, status, payment_status, created_at, customer_name, delivery_details, meta')
+      .eq('payment_status', 'paid')
+      .gte('created_at', fetchStartStr)
+      .lte('created_at', analyticsRange === 'custom' ? customRange.end + 'T23:59:59Z' : today.toISOString());
 
     const { data: swapData } = await supabase
       .from('subscription_swaps')
@@ -135,10 +144,15 @@ export default function AnalyticsTab({ showToast }: AnalyticsTabProps) {
       .gte('created_at', fetchStartStr)
       .lte('created_at', analyticsRange === 'custom' ? customRange.end + 'T23:59:59Z' : today.toISOString());
 
-    if (data) {
+    if (orderData) {
+      const data = orderData; // Keep reference for existing code
       const currentOrders = data.filter(o => o.created_at >= currentPeriodStartStr && o.created_at <= (analyticsRange === 'custom' ? customRange.end + 'T23:59:59Z' : today.toISOString()));
       const previousOrdersList = data.filter(o => o.created_at >= previousPeriodStart.toISOString() && o.created_at < currentPeriodStartStr);
       
+      // Merge Subscriptions into revenue calculation
+      const currentSubs = (subRevData || []).filter(s => s.created_at >= currentPeriodStartStr && s.created_at <= (analyticsRange === 'custom' ? customRange.end + 'T23:59:59Z' : today.toISOString()));
+      const previousSubs = (subRevData || []).filter(s => s.created_at >= previousPeriodStart.toISOString() && s.created_at < currentPeriodStartStr);
+
       const currentSwaps = (swapData || []).filter(s => s.created_at >= currentPeriodStartStr && s.created_at <= (analyticsRange === 'custom' ? customRange.end + 'T23:59:59Z' : today.toISOString()));
       const previousSwaps = (swapData || []).filter(s => s.created_at >= previousPeriodStart.toISOString() && s.created_at < currentPeriodStartStr);
 
@@ -146,16 +160,20 @@ export default function AnalyticsTab({ showToast }: AnalyticsTabProps) {
       const calculateSwapRev = (list: any[]) => list.reduce((sum, s) => sum + (s.meta?.price_diff || 0), 0);
 
       const orderRev = currentOrders.reduce((sum, o) => sum + calculateOrderSum(o), 0);
+      const subPurchaseRev = currentSubs.reduce((sum, s) => sum + (s.total || 0), 0);
       const swapRev = calculateSwapRev(currentSwaps);
-      const totalRev = orderRev + swapRev;
+      const totalRev = orderRev + subPurchaseRev + swapRev;
 
       const prevOrderRev = previousOrdersList.reduce((sum, o) => sum + calculateOrderSum(o), 0);
+      const prevSubRev = previousSubs.reduce((sum, s) => sum + (s.total || 0), 0);
       const prevSwapRev = calculateSwapRev(previousSwaps);
-      const previousRev = prevOrderRev + prevSwapRev;
+      const previousRev = prevOrderRev + prevSubRev + prevSwapRev;
 
       const activeSubs = currentOrders.filter(o => o.kind === 'personalized' && o.status !== 'delivered').length;
-      const totalOrders = currentOrders.length;
-      const previousOrdersCount = previousOrdersList.length;
+      const totalOrders = currentOrders.length + currentSubs.length; 
+      const previousOrdersCount = previousOrdersList.length + previousSubs.length; 
+
+
 
       const todayStart = new Date(); todayStart.setHours(0,0,0,0);
       const yestStart = new Date(); yestStart.setDate(today.getDate() - 1); yestStart.setHours(0,0,0,0);
@@ -179,7 +197,8 @@ export default function AnalyticsTab({ showToast }: AnalyticsTabProps) {
       setRealStats({ 
         totalRev, previousRev, activeSubs, totalOrders, previousOrders: previousOrdersCount,
         todayOrders, yesterdayOrders, thisWeekOrders, lastWeekOrders, filteredOrders: currentOrders,
-        swapRev // Keep track of swap revenue specifically
+        filteredSubs: currentSubs,
+        swapRev 
       });
     }
     setStatsLoading(false);
@@ -250,6 +269,17 @@ export default function AnalyticsTab({ showToast }: AnalyticsTabProps) {
       const d = new Date(o.created_at);
       const mStr = d.toLocaleString('en-US', { month: 'short' });
       if (monthlyRevMap[mStr] !== undefined) monthlyRevMap[mStr] += orderTotal;
+    });
+
+    // Add subscription purchases to velocity and monthly maps
+    realStats.filteredSubs?.forEach((s: any) => {
+      const dStr = new Date(s.created_at).toISOString().slice(5, 10);
+      if (!dailyVelocity[dStr]) dailyVelocity[dStr] = { date: dStr, regular: 0, subscription: 0, group: 0 };
+      dailyVelocity[dStr].subscription += (s.total || 0);
+
+      const d = new Date(s.created_at);
+      const mStr = d.toLocaleString('en-US', { month: 'short' });
+      if (monthlyRevMap[mStr] !== undefined) monthlyRevMap[mStr] += (s.total || 0);
     });
 
     const avgDeliveryTime = deliveryTimeCount > 0 ? Math.round(deliveryTimeSum / deliveryTimeCount) : 0;

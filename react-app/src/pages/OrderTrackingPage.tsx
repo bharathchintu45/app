@@ -125,7 +125,7 @@ function StatusTimeline({ status }: { status: string }) {
 
 
 
-function SecretPINCard({ otp, isPickup }: { otp: string, isPickup?: boolean }) {
+function SecretPINCard({ otp, isPickup, isSubscription }: { otp: string, isPickup?: boolean; isSubscription?: boolean }) {
   return (
     <motion.div
       initial={{ opacity: 0, y: 12, scale: 0.97 }}
@@ -147,9 +147,13 @@ function SecretPINCard({ otp, isPickup }: { otp: string, isPickup?: boolean }) {
             <ShieldCheck size={22} className="text-white" />
           </motion.div>
           <div>
-            <p className="text-[10px] font-black uppercase tracking-widest text-white/60 mb-0.5">🔒 {isPickup ? 'Secret Pickup PIN' : 'Secret Delivery PIN'}</p>
+            <p className="text-[10px] font-black uppercase tracking-widest text-white/60 mb-0.5">🔒 {isSubscription ? 'Master Delivery PIN' : isPickup ? 'Secret Pickup PIN' : 'Secret Delivery PIN'}</p>
             <p className="text-xs font-bold text-white/80 leading-tight pr-2">
-              {isPickup ? 'Show this PIN at the counter to collect your order' : 'Share with your delivery partner when they arrive'}
+              {isSubscription 
+                ? 'This secure PIN is used for ALL deliveries in your subscription.' 
+                : isPickup 
+                  ? 'Show this PIN at the counter to collect your order' 
+                  : 'Share with your delivery partner when they arrive'}
             </p>
           </div>
         </div>
@@ -548,7 +552,7 @@ function OrderCard({ order, onCancel, onSupport, storeMapUrl }: { order: DbOrder
         {/* 🔒 Secret Delivery PIN Card — fetched live, appears as soon as OTP is generated */}
         {orderMeta?.delivery_otp && !['delivered', 'cancelled'].includes(order.status) && (
           <div className="mb-6">
-            <SecretPINCard otp={orderMeta.delivery_otp} isPickup={order.delivery_details?.isPickup} />
+            <SecretPINCard otp={orderMeta.delivery_otp} isPickup={order.delivery_details?.isPickup} isSubscription={order.kind === 'subscription'} />
           </div>
         )}
 
@@ -810,6 +814,8 @@ export function OrderTrackingPage({
         supabase.from("orders")
           .select(`*, order_items(*)`)
           .eq("user_id", user.id)
+          .neq('payment_status', 'pending')
+          .neq('payment_status', 'failed')
           .order("created_at", { ascending: false })
           .limit(50),
         supabase.from("subscriptions")

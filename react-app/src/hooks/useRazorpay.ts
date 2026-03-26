@@ -88,6 +88,9 @@ export function useRazorpay() {
             name: "The Fit Bowls",
             description: `Order ${opts.orderNumber}`,
             image: "/logo.png",
+            notes: {
+              order_number: opts.orderNumber
+            },
             prefill: {
               name: opts.customerName,
               email: opts.customerEmail,

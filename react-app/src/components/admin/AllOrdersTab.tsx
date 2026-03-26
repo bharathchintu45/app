@@ -36,6 +36,8 @@ export default function AllOrdersTab({
     const { data, error } = await supabase
       .from('orders')
       .select('*, order_items(*)')
+      .neq('payment_status', 'pending')
+      .neq('payment_status', 'failed')
       .order('created_at', { ascending: false });
 
     if (error) {

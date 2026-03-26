@@ -19,6 +19,7 @@ import { SkeletonDashboard } from "../components/ui/Skeleton";
 import { useRazorpay } from "../hooks/useRazorpay";
 import { SwapConfirmationModal } from "../components/dashboard/SwapConfirmationModal";
 import { RescheduleModal } from "../components/dashboard/RescheduleModal";
+import { EmptyDashboardState } from "../components/dashboard/EmptyDashboardState";
 
 export function DashboardPage({
   user,
@@ -293,6 +294,12 @@ export function DashboardPage({
     const nextDate = dayKey(addDays(parseDateKeyToDate(selectedDate), 1));
     if (!dates.includes(nextDate)) return showToast("End of plan reached.");
     currentSetPlanMap((prev) => ({ ...prev, [nextDate]: { ...prev[selectedDate] } }));
+    // Also copy addons for the selected day
+    setDateSlotAddons((prev) => {
+      const sourceAddons = prev[selectedDate];
+      if (!sourceAddons || Object.keys(sourceAddons).length === 0) return prev;
+      return { ...prev, [nextDate]: JSON.parse(JSON.stringify(sourceAddons)) };
+    });
     setSelectedDate(nextDate);
   }
 
@@ -303,6 +310,15 @@ export function DashboardPage({
     currentSetPlanMap((prev) => {
       const next = { ...prev };
       for (const d of future) next[d] = { ...prev[selectedDate] };
+      return next;
+    });
+    // Also copy addons to all future days
+    setDateSlotAddons((prev) => {
+      const sourceAddons = prev[selectedDate];
+      if (!sourceAddons || Object.keys(sourceAddons).length === 0) return prev;
+      const next = { ...prev };
+      const addonsCopy = JSON.stringify(sourceAddons);
+      for (const d of future) next[d] = JSON.parse(addonsCopy);
       return next;
     });
     showToast(`Copied to ${future.length} days.`);
@@ -563,16 +579,10 @@ export function DashboardPage({
             </div>
           ) : viewMode === "tracking" ? (
             /* ── Self-cancelled / no subscription state ── */
-             <div className="rounded-2xl border border-slate-100 bg-white p-8 text-center mt-6 shadow-sm">
-                <div className="text-4xl mb-4">📭</div>
-                <h3 className="text-xl font-bold mb-2">No Active Subscription</h3>
-                <p className="text-slate-500 mb-6 max-w-sm mx-auto">You do not have an active subscription meal plan. Browse the menu or set up a plan to see your dashboard.</p>
-                <div className="flex justify-center flex-col sm:flex-row gap-4 max-w-sm mx-auto">
-                  <button onClick={() => setRoute("home")} className="w-full px-6 py-3 rounded-xl border border-slate-200 font-bold text-slate-700 hover:bg-slate-50 transition-colors">Browse Menu</button>
-                  <button onClick={() => setRoute("app")} className="w-full px-6 py-3 rounded-xl bg-slate-900 text-white font-bold hover:bg-black transition-colors">Build a Plan</button>
-                </div>
-             </div>
-
+            <EmptyDashboardState 
+              onBrowseMenu={() => setRoute("home")}
+              onBuildPlan={() => setRoute("app")}
+            />
           ) : (
              <PersonalizedPlanView
                isLoading={loading}

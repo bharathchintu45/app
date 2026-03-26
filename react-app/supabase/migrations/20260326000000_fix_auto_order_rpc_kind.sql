@@ -1,10 +1,7 @@
--- RELIABLE ORDER GENERATION MIGRATION
--- 1. Add sync_token to orders for absolute duplicate prevention
--- Format: sub:[uuid]:[date]:[slot]
-ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS sync_token text UNIQUE;
+-- MIGRATION: Fix create_subscription_order_v2 — use kind='subscription' (not 'personalized')
+-- This corrects Bug #3 where auto-generated subscription orders had the wrong kind field.
+-- Safe to re-run (CREATE OR REPLACE).
 
--- 2. Create the unified transaction RPC
--- This ensures Order + Items are created together or not at all
 CREATE OR REPLACE FUNCTION create_subscription_order_v2(
     p_user_id uuid,
     p_order_number text,
@@ -22,7 +19,7 @@ DECLARE
     v_order_id uuid;
     v_item jsonb;
 BEGIN
-    -- 1. Insert Order
+    -- 1. Insert Order with correct kind = 'subscription'
     INSERT INTO public.orders (
         user_id, order_number, customer_name, delivery_details, 
         delivery_date, subtotal, gst_amount, total, 
@@ -48,7 +45,7 @@ BEGIN
 
     RETURN v_order_id;
 EXCEPTION WHEN unique_violation THEN
-    -- If sync_token already exists, just return NULL or the existing order ID
+    -- If sync_token already exists, return the existing order ID
     -- This prevents the background script from crashing on retries
     RETURN (SELECT id FROM public.orders WHERE sync_token = p_sync_token LIMIT 1);
 END;

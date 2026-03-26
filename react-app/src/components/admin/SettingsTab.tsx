@@ -18,8 +18,8 @@ interface SettingsTabProps {
 export default function SettingsTab({ showToast }: SettingsTabProps) {
   // Use hooks for all settings
   const chatSetting = useAppSetting("chat_enabled", true);
-  const personalizedDiscount = useAppSettingNumber("personalized_plan_discount", 0);
-  const groupDiscount = useAppSettingNumber("group_order_discount", 0);
+  const personalizedDiscount = useAppSettingNumber("personalized_discount_pct", 15);
+  const groupDiscount = useAppSettingNumber("group_discount_pct", 0);
   const taxSetting = useAppSettingNumber("tax_percentage", 5);
   const enableRegularOrders = useAppSetting("enable_regular_orders", true);
   const enablePersonalizedSubscriptions = useAppSetting("enable_personalized_subscriptions", true);
@@ -37,12 +37,15 @@ export default function SettingsTab({ showToast }: SettingsTabProps) {
   const supportWhatsApp = useAppSettingString("support_whatsapp_number", "");
   const autoOrderTimeSetting = useAppSettingString("auto_order_generation_time", "05:00");
   const autoOrderEnabledSetting = useAppSetting("auto_order_generation_enabled", false);
+  const autoOrderLastRunSetting = useAppSettingString("auto_order_last_run", "Never");
   const kitchenRealtimeStatus = useAppSetting("kitchen_realtime_status_enabled", true);
   const kitchenPrepAggregation = useAppSetting("kitchen_prep_aggregation_enabled", true);
   const healthPreferencesEnabled = useAppSetting("enable_health_preferences", true);
   const enableDelivery = useAppSetting("enable_standard_delivery", true);
   const enablePickup = useAppSetting("enable_store_pickup", true);
   const storeAddressSetting = useAppSettingString("store_physical_address", "");
+  const contactFooterAddressSetting = useAppSettingString("contact_footer_address", "");
+  const contactFooterEmailSetting = useAppSettingString("contact_footer_email", "info@thefreshbox.in");
   const storeMapUrlSetting = useAppSettingString("store_map_url", "");
   const storeOpenWeekday = useAppSettingString("store_open_weekday", "06:00");
   const storeCloseWeekday = useAppSettingString("store_close_weekday", "21:00");
@@ -65,8 +68,8 @@ export default function SettingsTab({ showToast }: SettingsTabProps) {
       maintenanceSetting, cutoffSetting, chefNoteSetting, chefNoteEnabledSetting,
       rewardsEnabled, referralEnabled, bypassEmailsSetting, deliveryFeeSetting,
       freeDeliverySetting, supportPhone, supportWhatsApp, autoOrderTimeSetting,
-      autoOrderEnabledSetting, kitchenRealtimeStatus, kitchenPrepAggregation,
-      healthPreferencesEnabled, storeAddressSetting, storeMapUrlSetting,
+      autoOrderEnabledSetting, autoOrderLastRunSetting, kitchenRealtimeStatus, kitchenPrepAggregation,
+      healthPreferencesEnabled, storeAddressSetting, contactFooterAddressSetting, contactFooterEmailSetting, storeMapUrlSetting,
       storeOpenWeekday, storeCloseWeekday, storeOpenWeekend, storeCloseWeekend, googleMapsApiKey, enableStoreTimings,
       enableEmailAuth, enablePhoneAuth, enableAdminPortal, enableManagerPortal
     ].every(s => !s.loading);
@@ -93,12 +96,15 @@ export default function SettingsTab({ showToast }: SettingsTabProps) {
         supportWhatsApp: supportWhatsApp.value,
         autoOrderTime: autoOrderTimeSetting.value,
         autoOrderEnabled: autoOrderEnabledSetting.value,
+        autoOrderLastRun: autoOrderLastRunSetting.value,
         kitchenRealtimeEnabled: kitchenRealtimeStatus.value,
         enableKitchenPrepAggregation: kitchenPrepAggregation.value,
         enableHealthPreferences: healthPreferencesEnabled.value,
         enableDelivery: enableDelivery.value,
         enablePickup: enablePickup.value,
         storeAddress: storeAddressSetting.value,
+        contactFooterAddress: contactFooterAddressSetting.value,
+        contactFooterEmail: contactFooterEmailSetting.value,
         storeMapUrl: storeMapUrlSetting.value,
         storeOpenWeekday: storeOpenWeekday.value,
         storeCloseWeekday: storeCloseWeekday.value,
@@ -119,7 +125,7 @@ export default function SettingsTab({ showToast }: SettingsTabProps) {
     rewardsEnabled.loading, referralEnabled.loading, deliveryFeeSetting.loading, freeDeliverySetting.loading,
     supportPhone.loading, supportWhatsApp.loading, autoOrderTimeSetting.loading, autoOrderEnabledSetting.loading,
     kitchenRealtimeStatus.loading, kitchenPrepAggregation.loading, healthPreferencesEnabled.loading,
-    enableDelivery.loading, enablePickup.loading, storeAddressSetting.loading, storeMapUrlSetting.loading,
+    enableDelivery.loading, enablePickup.loading, storeAddressSetting.loading, contactFooterAddressSetting.loading, contactFooterEmailSetting.loading, storeMapUrlSetting.loading,
     storeOpenWeekday.loading, storeCloseWeekday.loading, storeOpenWeekend.loading, storeCloseWeekend.loading, googleMapsApiKey.loading,
     enableStoreTimings.loading, enableEmailAuth.loading, enablePhoneAuth.loading,
     enableAdminPortal.loading, enableManagerPortal.loading,
@@ -154,6 +160,8 @@ export default function SettingsTab({ showToast }: SettingsTabProps) {
       await supportPhone.update(draftSettings.supportPhone);
       await supportWhatsApp.update(draftSettings.supportWhatsApp);
       await storeAddressSetting.update(draftSettings.storeAddress);
+      await contactFooterAddressSetting.update(draftSettings.contactFooterAddress);
+      await contactFooterEmailSetting.update(draftSettings.contactFooterEmail);
       await storeMapUrlSetting.update(draftSettings.storeMapUrl);
       await storeOpenWeekday.update(draftSettings.storeOpenWeekday);
       await storeCloseWeekday.update(draftSettings.storeCloseWeekday);
@@ -558,6 +566,37 @@ export default function SettingsTab({ showToast }: SettingsTabProps) {
 
           <div className="bg-slate-50 border border-slate-200 rounded-2xl p-6 flex flex-col justify-between col-span-full">
             <div>
+              <h3 className="font-bold text-emerald-900">Contact Footer Email</h3>
+              <p className="text-sm text-slate-500 mt-1">The email address displayed publicly in the website footer.</p>
+            </div>
+            <div className="mt-4">
+              <Input 
+                value={draftSettings?.contactFooterEmail ?? ""} 
+                onChange={(e: any) => setDraftSettings((d: any) => d ? { ...d, contactFooterEmail: e.target.value } : null)}
+                className="w-full font-bold bg-white"
+                placeholder="info@thefreshbox.in"
+              />
+            </div>
+          </div>
+
+          <div className="bg-slate-50 border border-slate-200 rounded-2xl p-6 flex flex-col justify-between col-span-full">
+            <div>
+              <h3 className="font-bold text-emerald-900">Contact Footer Address</h3>
+              <p className="text-sm text-slate-500 mt-1">The address display on the public website footer (distinct from Checkout Store Pickup Address).</p>
+            </div>
+            <div className="mt-4">
+              <textarea 
+                value={draftSettings?.contactFooterAddress ?? ""} 
+                onChange={(e: any) => setDraftSettings((d: any) => d ? { ...d, contactFooterAddress: e.target.value } : null)}
+                className="w-full font-bold bg-white text-sm p-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-emerald-500 outline-none"
+                placeholder="HQ Address..."
+                rows={2}
+              />
+            </div>
+          </div>
+
+          <div className="bg-slate-50 border border-slate-200 rounded-2xl p-6 flex flex-col justify-between col-span-full">
+            <div>
               <h3 className="font-bold text-slate-900">Physical Store Address</h3>
               <p className="text-sm text-slate-500 mt-1">Address shown to customers when they select Store Pickup.</p>
             </div>
@@ -696,6 +735,14 @@ export default function SettingsTab({ showToast }: SettingsTabProps) {
                 <p className="text-sm text-indigo-700/70 mt-1">
                   The system will automatically generate orders for all active subscriptions at the time specified below.
                 </p>
+                {draftSettings?.autoOrderLastRun && draftSettings.autoOrderLastRun !== "Never" && (
+                  <div className="mt-2 flex items-center gap-2 bg-indigo-100/50 w-fit px-3 py-1.5 rounded-lg border border-indigo-200">
+                    <ShieldCheck className="w-3.5 h-3.5 text-indigo-600" />
+                    <span className="text-[11px] font-bold text-indigo-900">
+                      Last Successful Run: <span className="opacity-70">{draftSettings.autoOrderLastRun}</span>
+                    </span>
+                  </div>
+                )}
                 <div className="mt-4 flex flex-wrap items-center gap-6">
                   <div className="flex flex-col gap-1.5">
                     <label className="text-[10px] font-black uppercase tracking-widest text-indigo-500/60">Daily Run Time (IST)</label>

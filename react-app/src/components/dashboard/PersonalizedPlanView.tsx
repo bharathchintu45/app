@@ -3,9 +3,9 @@ import { Card, CardHeader, CardContent } from "../ui/Card";
 import { Input } from "../ui/Input";
 import { Button } from "../ui/Button";
 import { SectionTitle } from "../ui/Typography";
-import { Sparkles, ArrowRight, Search, Flame, Beef, Wheat, Droplets, Leaf, CalendarDays, Clock, Coffee, Sun, Utensils, Copy, Repeat } from "lucide-react";
+import { Sparkles, ArrowRight, Search, Flame, Beef, Wheat, Droplets, Leaf, CalendarDays, Clock, Coffee, Sun, Utensils, Copy, Repeat, LeafyGreen } from "lucide-react";
 import { formatDateIndia, slotLabel, clamp, digitsOnly, parseDateKeyToDate, dayKey, addDays } from "../../lib/format";
-import { DURATIONS, PLAN_TYPES, subscriptionId } from "../../data/menu";
+import { DURATIONS, PLAN_TYPES, subscriptionId, isVeg } from "../../data/menu";
 import { useAppSettingNumber } from "../../hooks/useAppSettings";
 import { cn } from "../../lib/utils";
 import { MealPopup } from "./MealPopup";
@@ -150,6 +150,7 @@ export function PersonalizedPlanView({
   // Internal state for popup-based menu sections
   const [section, setSection] = useState("all");
   const [menuSearch, setMenuSearch] = useState("");
+  const [vegMode, setVegMode] = useState(false);
 
   const sectionItems = useMemo(() => {
     const q = menuSearch.trim().toLowerCase();
@@ -160,8 +161,9 @@ export function PersonalizedPlanView({
         if (section === "extra") return m.category === "Add-Ons";
         return true;
       })
-      .filter(m => !q || (m.name + (m.description || "")).toLowerCase().includes(q));
-  }, [menu, section, menuSearch]);
+      .filter(m => !q || (m.name + (m.description || "")).toLowerCase().includes(q))
+      .filter(m => !vegMode || isVeg(m));
+  }, [menu, section, menuSearch, vegMode]);
 
   const isAddonSection = MENU_SECTIONS.find(s => s.id === section)?.kind === "addon";
 
@@ -536,14 +538,34 @@ export function PersonalizedPlanView({
                         </button>
                       ))}
                     </div>
-                    <div className="relative">
-                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={14} />
-                      <Input 
-                        value={menuSearch} 
-                        onChange={(e) => setMenuSearch(e.target.value)} 
-                        placeholder="Search items…" 
-                        className="pl-9 h-9 w-full bg-slate-50 border-slate-100 text-sm focus:bg-white transition-all" 
-                      />
+                    <div className="flex items-center gap-2">
+                      <div className="relative flex-1">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={14} />
+                        <Input 
+                          value={menuSearch} 
+                          onChange={(e) => setMenuSearch(e.target.value)} 
+                          placeholder="Search items…" 
+                          className="pl-9 h-9 w-full bg-slate-50 border-slate-100 text-sm focus:bg-white transition-all" 
+                        />
+                      </div>
+                      <button
+                        onClick={() => setVegMode(!vegMode)}
+                        className={cn(
+                          "flex items-center gap-1.5 h-9 px-3 rounded-xl border-2 text-xs font-black uppercase tracking-wider transition-all shrink-0",
+                          vegMode
+                            ? "border-green-500 bg-green-500 text-white shadow-md shadow-green-500/20"
+                            : "border-green-200 bg-white text-green-600 hover:border-green-400 hover:bg-green-50"
+                        )}
+                      >
+                        <LeafyGreen size={14} />
+                        <span className="hidden sm:inline">Veg</span>
+                        <div className={cn(
+                          "w-4 h-4 rounded-full border-2 flex items-center justify-center",
+                          vegMode ? "border-white bg-white" : "border-green-300"
+                        )}>
+                          {vegMode && <div className="w-2 h-2 rounded-full bg-green-500" />}
+                        </div>
+                      </button>
                     </div>
                   </div>
 

@@ -2,11 +2,9 @@ import { ChefHat, Mail, Phone, MapPin } from "lucide-react";
 import { useAppSettingString } from "../../hooks/useAppSettings";
 
 export function Footer() {
-  const { value: storeAddress } = useAppSettingString("store_address", "123 Health Avenue\nFitness District 500001");
-  const { value: supportPhone } = useAppSettingString("support_phone", "+91 8008880000");
-  const { value: bypassEmails } = useAppSettingString("maintenance_bypass_emails", "info@thefitbowl.in");
-  
-  const mainEmail = bypassEmails.split(',')[0].trim();
+  const { value: contactAddress } = useAppSettingString("contact_footer_address", "123 Health Avenue\nFitness District 500001");
+  const { value: supportPhone } = useAppSettingString("support_phone_number", "+91 8008880000");
+  const { value: mainEmail } = useAppSettingString("contact_footer_email", "info@thefreshbox.in");
 
   return (
     <footer className="mt-16 pt-16 pb-8 border-t border-slate-200">
@@ -49,7 +47,7 @@ export function Footer() {
           <ul className="space-y-4 text-sm text-slate-500">
             <li className="flex items-start gap-3">
               <MapPin className="w-5 h-5 text-emerald-500 shrink-0" />
-              <span className="whitespace-pre-line">{storeAddress}</span>
+              <span className="whitespace-pre-line">{contactAddress}</span>
             </li>
             <li className="flex items-center gap-3">
               <Phone className="w-5 h-5 text-emerald-500 shrink-0" />

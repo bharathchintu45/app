@@ -15,7 +15,7 @@ import { Input, Textarea } from "../components/ui/Input";
 import { SectionTitle, LuxuryLabel } from "../components/ui/Typography";
 import { formatINR, formatDateTimeIndia, formatDateIndia, dayKey, addDays, parseDateKeyToDate, digitsOnly } from "../lib/format";
 import { cn } from "../lib/utils";
-import { User, Sparkles, MapPin, Plus, LocateFixed, ArrowRight, Store, Navigation, Map as MapIcon, CheckCircle2, AlertTriangle } from "lucide-react";
+import { User, Sparkles, MapPin, Plus, LocateFixed, ArrowRight, Store, Navigation, Map as MapIcon, CheckCircle2, AlertTriangle, Package, Clock, Receipt, ChevronRight, ShieldCheck } from "lucide-react";
 import { MapPicker } from "../components/ui/MapPicker";
 import { OrderStatusOverlay } from "../components/ui/OrderStatusOverlay";
 import { api } from "../lib/api";
@@ -41,17 +41,16 @@ function PriceBox({
   discountPct = 0,
   discountLabel = "Discount",
   deliveryFee = 0,
-  isFreeDelivery = false,
+  isFreeDelivery = false
 }: {
   title: string;
-  items: Array<{ name: string; qty: number; price?: number }>;
+  items: Array<{ name: string; qty: number; price?: number; image?: string }>;
   gstRate: number;
   discountPct?: number;
   discountLabel?: string;
   deliveryFee?: number;
   isFreeDelivery?: boolean;
 }) {
-  const hasAnyPrice = items.some((x) => typeof x.price === "number");
   const subtotal = items.reduce((acc, it) => acc + (it.price ?? 0) * it.qty, 0);
   const discount = subtotal * (discountPct / 100);
   const discountedSubtotal = subtotal - discount;
@@ -60,39 +59,59 @@ function PriceBox({
   const total = discountedSubtotal + gst + effectiveDeliveryFee;
 
   return (
-    <div className="rounded-2xl border border-black/10 bg-black/3 p-4">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <div className="text-sm font-semibold">{title}</div>
-          {!hasAnyPrice && <div className="text-xs text-black/50 mt-1">Prices pending admin setup.</div>}
+    <div className="animate-fade-in-up">
+      <div className="flex items-center justify-between mb-4 pb-3 border-b border-slate-100">
+        <div className="flex items-center gap-2">
+          <div className="p-1.5 bg-emerald-50 rounded-lg text-emerald-600">
+            <Receipt size={16} />
+          </div>
+          <span className="text-sm font-bold text-slate-800">{title}</span>
         </div>
-        <div className="flex items-center gap-2 text-xs">
-          <span className="text-slate-500 font-medium tracking-widest uppercase text-[9px]">Tax Included GST ({Math.round(gstRate * 100)}%)</span>
+        <div className="bg-slate-100 px-2.5 py-1 rounded-full text-[9px] font-black uppercase text-slate-500 tracking-wider whitespace-nowrap">
+          Tax Included · GST ({Math.round(gstRate * 100)}%)
         </div>
       </div>
 
-      <div className="mt-4 space-y-3 text-sm">
+      <div className="space-y-4 mb-6">
         {items.length ? (
           items.map((it, idx) => (
-            <div key={idx} className="flex items-start justify-between">
-              <div>
-                <div className="font-medium text-black">{it.name}</div>
-                <div className="text-xs text-black/55">Qty: {it.qty}</div>
+            <div key={idx} className="flex items-center gap-3">
+              {it.image ? (
+                <div className="w-12 h-12 rounded-xl bg-slate-100 overflow-hidden flex-shrink-0 border border-slate-100 shadow-sm">
+                  <img src={it.image} alt={it.name} className="w-full h-full object-cover" />
+                </div>
+              ) : (
+                <div className="w-12 h-12 rounded-xl bg-indigo-50 flex items-center justify-center text-indigo-400 flex-shrink-0 border border-indigo-100 shadow-sm">
+                  <Package size={20} />
+                </div>
+              )}
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-bold text-slate-800 truncate leading-tight mb-0.5">{it.name}</div>
+                <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Qty: {it.qty}</div>
               </div>
-              <div className="text-slate-700 font-medium">
-                {typeof it.price === "number" ? formatINR(it.price * it.qty) : "—"}
+              <div className="text-sm font-black text-slate-900 ml-2">
+                {typeof it.price === 'number' ? formatINR(it.price * it.qty) : "—"}
               </div>
             </div>
           ))
         ) : (
-          <div className="text-sm text-slate-500 italic">No chargeable items selected.</div>
+          <div className="py-8 text-center bg-slate-50/50 rounded-2xl border border-dashed border-slate-200">
+            <span className="text-xs text-slate-400 font-medium">No items selected</span>
+          </div>
         )}
       </div>
 
       <div className="mt-4 border-t border-black/10 pt-4 text-sm space-y-2">
         <div className="flex items-center justify-between text-black/60">
           <span>Subtotal</span>
-          <span className="font-medium text-black">{formatINR(subtotal)}</span>
+          {discount > 0 ? (
+            <div className="flex items-center gap-2">
+              <span className="text-black/40 line-through text-xs font-normal">{formatINR(subtotal)}</span>
+              <span className="font-medium text-black">{formatINR(discountedSubtotal)}</span>
+            </div>
+          ) : (
+            <span className="font-medium text-black">{formatINR(subtotal)}</span>
+          )}
         </div>
         {discount > 0 && (
           <div className="flex items-center justify-between text-green-700 font-semibold">
@@ -117,9 +136,9 @@ function PriceBox({
             )}
           </div>
         )}
-        <div className="mt-2 flex items-center justify-between pt-2 border-t border-black/10">
-          <span className="text-base font-bold text-black">Total</span>
-          <span className="text-base font-bold text-green-700">{formatINR(total)}</span>
+        <div className="mt-2 flex items-center justify-between pt-2 border-t border-slate-200">
+          <span className="text-base font-bold text-slate-900">Total</span>
+          <span className="text-xl font-black text-emerald-600">{formatINR(total)}</span>
         </div>
       </div>
     </div>
@@ -358,7 +377,7 @@ function CheckoutCommon({
         </div>
       </div>
 
-      <div className="grid gap-8 lg:grid-cols-5">
+      <div className="flex flex-col-reverse lg:grid gap-8 lg:grid-cols-5">
         <div className="lg:col-span-3 space-y-6">
           <Card>
             <CardHeader>
@@ -648,12 +667,17 @@ function CheckoutCommon({
         </div>
 
         <div className="lg:col-span-2 space-y-6">
-          <Card className="sticky top-24">
-            <CardHeader>
-              <LuxuryLabel text="Order summary" />
-              <div className="mt-2 text-sm text-black/55">Review your selected items and totals.</div>
+          <Card className="lg:sticky lg:top-8 lg:max-h-[calc(100vh-4rem)] flex flex-col shadow-xl shadow-slate-200/40 border-slate-200/60 rounded-[2rem] overflow-hidden bg-white">
+            <CardHeader className="pb-2">
+              <div className="flex items-center justify-between">
+                <LuxuryLabel text="Order summary" />
+                <div className="flex items-center gap-1 px-2 py-0.5 bg-emerald-50 text-emerald-700 rounded-full text-[10px] font-bold uppercase tracking-wider border border-emerald-100/50">
+                  <ShieldCheck className="w-3 h-3" /> Secure
+                </div>
+              </div>
+              <div className="mt-2 text-[11px] text-slate-500 font-medium uppercase tracking-tighter">Review your items and final total</div>
             </CardHeader>
-            <CardContent className="pt-6">
+            <CardContent className="pt-6 flex-1 overflow-y-auto custom-scrollbar">
               <div className="space-y-6">
                 {summaryRight}
                 {extraContent}
@@ -731,7 +755,7 @@ export function CheckoutRegularPage({
     }
   }, [taxSetting.value, taxSetting.loading]);
 
-  const priceItems = useMemo(() => cartItems.map(({ item, qty }) => ({ name: item.name, qty, price: item.priceINR })), [cartItems]);
+  const priceItems = useMemo(() => cartItems.map(({ item, qty }) => ({ name: item.name, qty, price: item.priceINR, image: item.image })), [cartItems]);
   const [payError, setPayError] = useState("");
   const { openPayment, loading: payLoading } = useRazorpay();
   const [isPickup, setIsPickup] = useState(false);
@@ -759,58 +783,60 @@ export function CheckoutRegularPage({
           freeDeliverySetting.value
         );
 
-        const processOrder = async () => {
-          const deliveryOtp = Math.floor(1000 + Math.random() * 9000).toString();
-          const { data: dbOrder, error: orderErr } = await supabase.from('orders').insert({
-            order_number: orderNumber,
-            user_id: user.id,
-            customer_name: d.delivery.receiverName,
-            delivery_date: new Date().toISOString().slice(0, 10),
-            status: 'pending',
-            kind: 'regular',
-            payment_status: 'paid',
-            subtotal: Math.round(summary.subtotal),
-            gst_amount: Math.round(summary.gst),
-            delivery_fee: Math.round(summary.deliveryFee),
-            total: Math.round(summary.total),
-            delivery_details: d.delivery,
-            meta: { delivery_otp: deliveryOtp }
-          }).select('id').single();
+        // Step 1: Pre-create order in DB as "pending" so Razorpay Webhook can recover it if frontend crashes
+        const deliveryOtp = Math.floor(1000 + Math.random() * 9000).toString();
+        const { data: dbOrder, error: orderErr } = await supabase.from('orders').insert({
+          order_number: orderNumber, user_id: user.id, customer_name: d.delivery.receiverName,
+          delivery_date: new Date().toISOString().slice(0, 10),
+          status: 'pending', kind: 'regular', payment_status: 'pending',
+          subtotal: Math.round(summary.subtotal), gst_amount: Math.round(summary.gst),
+          delivery_fee: Math.round(summary.deliveryFee), total: Math.round(summary.total),
+          delivery_details: d.delivery,
+          meta: { delivery_otp: deliveryOtp }
+        }).select('id').single();
 
-          if (orderErr || !dbOrder) { setPayError(`Order save failed: ${orderErr?.message}`); return; }
+        if (orderErr || !dbOrder) { setPayError(`Order initialization failed: ${orderErr?.message}`); return; }
 
-          if (cartItems.length > 0) {
-            await supabase.from('order_items').insert(
-              cartItems.map(({ item, qty }) => ({ order_id: dbOrder.id, menu_item_id: item.id, item_name: item.name, quantity: qty, unit_price: item.priceINR }))
-            );
-          }
+        if (cartItems.length > 0) {
+          await supabase.from('order_items').insert(
+            cartItems.map(({ item, qty }) => ({ order_id: dbOrder.id, menu_item_id: item.id, item_name: item.name, quantity: qty, unit_price: item.priceINR }))
+          );
+        }
 
-          const receipt: OrderReceipt = {
-            id: orderNumber, kind: "regular", createdAt: Date.now(),
-            headline: "Order Confirmed", deliveryAtLabel: "Next available delivery",
-            customer: { ...d.delivery, receiverPhone: "+91" + d.delivery.receiverPhone.slice(-10), instructions: d.delivery.instructions || undefined },
-            payment: "PAID",
-            lines: cartItems.map(({ item, qty }) => ({ itemId: item.id, label: item.name, qty, unitPriceAtOrder: item.priceINR })),
-            priceSummary: summary,
-          };
-          setLastOrder(receipt);
-          setRegularCart({});
-          // Success overlay will handle navigation after delay
-        };
-
+        // Step 2: Open Razorpay
         await openPayment({
           amount: summary.total,
           orderNumber,
           customerName: d.delivery.receiverName,
           customerEmail: user.email || '',
           customerPhone: d.delivery.receiverPhone,
-          onFailure: (reason) => {
+          onFailure: async (reason) => {
             setPayError(reason);
             setOrderStatus("failure");
+            // Clean up the draft order since payment failed/dismissed
+            await supabase.from('orders').update({ status: 'cancelled', payment_status: 'failed' }).eq('id', dbOrder.id);
           },
-          onSuccess: async () => {
+          onSuccess: async (paymentId, razorpayOrderId) => {
             setOrderStatus("success");
-            await processOrder();
+
+            // Mark order as paid and preparing
+            await supabase.from('orders').update({
+              status: 'preparing',
+              payment_status: 'paid',
+              meta: { delivery_otp: deliveryOtp, razorpay_payment_id: paymentId, razorpay_order_id: razorpayOrderId }
+            }).eq('id', dbOrder.id);
+
+            const receipt: OrderReceipt = {
+              id: orderNumber, kind: "regular", createdAt: Date.now(),
+              headline: "Order Confirmed", deliveryAtLabel: "Next available delivery",
+              customer: { ...d.delivery, receiverPhone: "+91" + d.delivery.receiverPhone.slice(-10), instructions: d.delivery.instructions || undefined },
+              payment: "PAID",
+              lines: cartItems.map(({ item, qty }) => ({ itemId: item.id, label: item.name, qty, unitPriceAtOrder: item.priceINR })),
+              priceSummary: summary,
+            };
+            setLastOrder(receipt);
+            setRegularCart({});
+            
             setTimeout(() => {
               setRoute("order-confirmation");
             }, 2000);
@@ -825,7 +851,15 @@ export function CheckoutRegularPage({
       }
       submitLabel={payLoading ? "Opening Payment..." : "PAY"}
       submitDisabled={payLoading}
-      summaryRight={<PriceBox title="Cart Items" items={priceItems} gstRate={gstRate} deliveryFee={isPickup ? 0 : deliveryFeeSetting.value} isFreeDelivery={freeDeliverySetting.value} />}
+      summaryRight={
+        <PriceBox 
+          title="Cart Items" 
+          items={priceItems} 
+          gstRate={gstRate} 
+          deliveryFee={isPickup ? 0 : deliveryFeeSetting.value} 
+          isFreeDelivery={freeDeliverySetting.value}
+        />
+      }
     />
   );
 }
@@ -879,12 +913,12 @@ export function CheckoutPersonalPage({
       }
     }
 
-    const agg = new Map<string, { id: string; name: string; qty: number; price?: number }>();
+    const agg = new Map<string, { id: string; name: string; qty: number; price?: number; image?: string }>();
     for (const l of lines) {
       const key = l.item.id;
       const cur = agg.get(key);
       if (cur) cur.qty += l.qty;
-      else agg.set(key, { id: l.item.id, name: l.item.name, qty: l.qty, price: l.item.priceINR });
+      else agg.set(key, { id: l.item.id, name: l.item.name, qty: l.qty, price: l.item.priceINR, image: l.item.image });
     }
     return { lines, items: Array.from(agg.values()) };
   }, [dates, holds, plan.allowedSlots, planMap, dateSlotAddons]);
@@ -920,7 +954,8 @@ export function CheckoutPersonalPage({
           .from('subscriptions')
           .select('id')
           .eq('user_id', user.id)
-          .in('status', ['active', 'ready', 'preparing', 'new'])
+          .in('status', ['active', 'paused', 'trialing'])
+          .eq('payment_status', 'paid')
           .maybeSingle();
 
         if (existingSub) {
@@ -939,90 +974,113 @@ export function CheckoutPersonalPage({
         );
         const orderNumber = makeOrderId();
 
-        const processOrder = async () => {
-          // Address saving is now handled centrally in CheckoutCommon.handlePlaceOrder
-          // We still need to mark as Pro for subscriptions
-          setUser(prev => prev ? { ...prev, isPro: true } : prev);
-          await supabase.from('profiles').update({ is_pro: true }).eq('id', user.id);
+        const processOrder = async (): Promise<{ success: boolean; subId?: string; deliveryOtp?: string }> => {
+          try {
+            // We still need to mark as Pro for subscriptions
+            setUser(prev => prev ? { ...prev, isPro: true } : prev);
+            await supabase.from('profiles').update({ is_pro: true }).eq('id', user.id);
 
-          const endDate = dayKey(addDays(parseDateKeyToDate(startKey), Math.max(0, plan.duration - 1)));
-          // ── No parent 'orders' row for subscriptions anymore! ──
-          // This prevents subscriptions from cluttering the Kitchen and Order History.
-          // The source of truth is now solely the 'subscriptions' table.
+            const endDate = dayKey(addDays(parseDateKeyToDate(startKey), Math.max(0, plan.duration - 1)));
 
-          // ── Insert into dedicated subscriptions table ──
-          // This is the source of truth for App.tsx dashboard display and admin management
-          const scheduleLines = chargeable.lines.map(l => ({
-            day: l.day, slot: l.slot, itemId: l.item.id,
-            label: l.item.name, qty: l.qty, unitPriceAtOrder: l.item.priceINR,
-            ...(l.type === 'addon' ? { type: 'addon' } : {})
-          }));
-          const { data: subData, error: subTableErr } = await supabase.from('subscriptions').insert({
-            user_id: user.id,
-            customer_name: d.delivery.receiverName,
-            plan_name: plan.title,
-            plan_type: plan.allowedSlots.join(' + '),
-            duration_days: plan.duration,
-            start_date: startKey,
-            end_date: endDate,
-            status: 'active',
-            schedule: scheduleLines,
-            delivery_details: d.delivery,
-            targets: targetMap[subscription] || {},
-            meta: { planId: subscription, orderNumber },
-            delivery_fee: Math.round(summary.deliveryFee),
-            total: Math.round(summary.total),
-            payment_status: 'paid',
-          }).select('id').single();
+            // ── Insert into dedicated subscriptions table ──
+            const scheduleLines = chargeable.lines.map(l => ({
+              day: l.day, slot: l.slot, itemId: l.item.id,
+              label: l.item.name, qty: l.qty, unitPriceAtOrder: l.item.priceINR,
+              ...(l.type === 'addon' ? { type: 'addon' } : {})
+            }));
 
-          if (subTableErr || !subData) {
-            console.error("[App] Subscription table insert error:", subTableErr);
-            setPayError(`Subscription activation failed: ${subTableErr?.message || 'Unknown error'}`);
-            return;
+            // Generate a 4-digit master delivery OTP for the subscription
+            const deliveryOtp = Math.floor(1000 + Math.random() * 9000).toString();
+
+            const { data: subData, error: subTableErr } = await supabase.from('subscriptions').insert({
+              user_id: user.id,
+              customer_name: d.delivery.receiverName,
+              plan_name: plan.title,
+              plan_type: plan.allowedSlots.join(' + '),
+              duration_days: plan.duration,
+              start_date: startKey,
+              end_date: endDate,
+              status: 'active',
+              schedule: scheduleLines,
+              delivery_details: d.delivery,
+              targets: targetMap[subscription] || {},
+              meta: { planId: subscription, orderNumber, deliveryFee: Math.round(summary.deliveryFee), delivery_otp: deliveryOtp },
+              total: Math.round(summary.total),
+              payment_status: 'pending', // Webhook will set to 'paid'
+            }).select('id').single();
+
+            if (subTableErr || !subData) {
+              console.error("[Checkout] Subscription insert error:", subTableErr);
+              setPayError(`Subscription activation failed: ${subTableErr?.message || 'Unknown error'}`);
+              setOrderStatus("failure");
+              return { success: false };
+            }
+
+            return { success: true, subId: subData.id, deliveryOtp };
+          } catch (err: any) {
+            console.error("[Checkout] Unexpected error during subscription creation:", err);
+            setPayError(`Subscription activation failed: ${err?.message || 'Unexpected error'}`);
+            setOrderStatus("failure");
+            return { success: false };
           }
-
-          const receipt: OrderReceipt = {
-            id: orderNumber, kind: "personalized", createdAt: Date.now(),
-            headline: "Subscription Scheduled", deliveryAtLabel: `${plan.duration} days schedule`,
-            customer: { ...d.delivery, receiverPhone: "+91" + d.delivery.receiverPhone.slice(-10), instructions: d.delivery.instructions || undefined },
-            payment: "PAID",
-            meta: { 
-              plan: plan.title, startDate: startKey, endDate: dayKey(addDays(parseDateKeyToDate(startKey), Math.max(0, plan.duration - 1))), durationDays: plan.duration, mealsPerDay: plan.allowedSlots.length, chargeableDeliveries: chargeable.lines.length,
-              scheduleLines: chargeable.lines.map((l) => ({ day: l.day, slot: l.slot, itemId: l.item.id, label: l.item.name, qty: l.qty, unitPriceAtOrder: l.item.priceINR })) 
-            },
-            lines: chargeable.lines.map((l) => ({
-              itemId: l.item.id,
-              label: l.type === 'addon' ? `${l.item.name} [Add-on]` : l.item.name,
-              qty: l.qty,
-              unitPriceAtOrder: l.item.priceINR,
-            })),
-            priceSummary: summary,
-          };
-          setLastOrder(receipt);
-          
-          // Clear persistent planning state on success
-          clearPlanningState();
-
-          // Trigger welcome email in the background (fire and forget)
-          api.v1.sendWelcomeEmail(subData.id).catch(console.error);
-          
-          // Success overlay will handle navigation after delay
         };
 
-        // Subscriptions always go through Razorpay (payment method selection is hidden)
+        // Create the pending subscription first
+        const initResult = await processOrder() as { success: boolean, subId?: string, deliveryOtp?: string };
+        if (!initResult.success || !initResult.subId) return;
+
+        // Subscriptions always go through Razorpay
         await openPayment({
           amount: summary.total,
           orderNumber,
           customerName: d.delivery.receiverName,
           customerEmail: user.email || '',
           customerPhone: d.delivery.receiverPhone,
-          onFailure: (reason) => {
+          onFailure: async (reason) => {
             setPayError(reason);
             setOrderStatus("failure");
+            // Revert to inactive since payment failed
+            if (initResult.subId) {
+              await supabase.from('subscriptions').update({ status: 'cancelled', payment_status: 'failed' }).eq('id', initResult.subId);
+            }
           },
-          onSuccess: async () => {
+          onSuccess: async (paymentId, razorpayOrderId) => {
             setOrderStatus("success");
-            await processOrder();
+            
+            // Mark subscription as paid and capture payment IDs
+            await supabase.from('subscriptions').update({
+              payment_status: 'paid',
+              meta: { planId: subscription, orderNumber, deliveryFee: Math.round(summary.deliveryFee), delivery_otp: initResult.deliveryOtp, razorpay_payment_id: paymentId, razorpay_order_id: razorpayOrderId }
+            }).eq('id', initResult.subId);
+
+            const receipt: OrderReceipt = {
+              id: orderNumber, kind: "subscription", createdAt: Date.now(),
+              headline: "Subscription Scheduled", deliveryAtLabel: `${plan.duration} days schedule`,
+              customer: { ...d.delivery, receiverPhone: "+91" + d.delivery.receiverPhone.slice(-10), instructions: d.delivery.instructions || undefined },
+              payment: "PAID",
+              meta: { 
+                delivery_otp: initResult.deliveryOtp,
+                plan: plan.title, startDate: startKey, endDate: dayKey(addDays(parseDateKeyToDate(startKey), Math.max(0, plan.duration - 1))), durationDays: plan.duration, mealsPerDay: plan.allowedSlots.length, chargeableDeliveries: chargeable.lines.length,
+                scheduleLines: chargeable.lines.map((l: any) => ({ day: l.day, slot: l.slot, itemId: l.item.id, label: l.item.name, qty: l.qty, unitPriceAtOrder: l.item.priceINR })) 
+              },
+              lines: chargeable.lines.map((l: any) => ({
+                itemId: l.item.id,
+                label: l.type === 'addon' ? `${l.item.name} [Add-on]` : l.item.name,
+                qty: l.qty,
+                unitPriceAtOrder: l.item.priceINR,
+              })),
+              priceSummary: summary,
+            };
+            setLastOrder(receipt);
+            
+            // Clear persistent planning state on success
+            clearPlanningState();
+
+            // Trigger welcome email in the background
+            if (initResult.subId) {
+                api.v1.sendWelcomeEmail(initResult.subId).catch(console.error);
+            }
+
             setTimeout(() => {
               setRoute("order-confirmation");
             }, 2000);
@@ -1032,7 +1090,7 @@ export function CheckoutPersonalPage({
       extraContent={
         <>
           {payError ? <div className="mt-3 p-3 bg-rose-50 text-rose-700 text-sm rounded-xl border border-rose-100">{payError}</div> : null}
-          <OrderStatusOverlay status={orderStatus} onClose={() => setOrderStatus("none")} />
+          <OrderStatusOverlay status={orderStatus} onClose={() => setOrderStatus("none")} errorDetail={payError} />
         </>
       }
 
@@ -1086,8 +1144,11 @@ export function CheckoutGroupPage({
     }
   }, [taxSetting.value, taxSetting.loading]);
 
-  const groupDiscount = useAppSettingNumber("group_discount_pct", 0);
-  const priceItems = useMemo(() => cartItems.map(({ item, qty }) => ({ name: item.name, qty, price: item.priceINR })), [cartItems]);
+  const groupDiscountSetting = useAppSettingNumber("group_discount_pct", 0);
+  const totalUnits = useMemo(() => cartItems.reduce((a, b) => a + b.qty, 0), [cartItems]);
+  const effectiveDiscount = totalUnits > 10 ? groupDiscountSetting.value : 0;
+
+  const priceItems = useMemo(() => cartItems.map(({ item, qty }) => ({ name: item.name, qty, price: item.priceINR, image: item.image })), [cartItems]);
   const [payError, setPayError] = useState("");
   const { openPayment, loading: payLoading } = useRazorpay();
   const [isPickup, setIsPickup] = useState(false);
@@ -1138,45 +1199,34 @@ export function CheckoutGroupPage({
         const summary = computePriceSummary(
           cartItems.map(({ item, qty }) => ({ price: item.priceINR, qty })),
           gstRate,
-          groupDiscount.value,
+          effectiveDiscount,
           isPickup ? 0 : deliveryFeeSetting.value,
           freeDeliverySetting.value
         );
         const deliveryDateStr = groupDraft.deliveryAt ? new Date(groupDraft.deliveryAt).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10);
 
-        const processOrder = async () => {
+        const processOrder = async (): Promise<{ success: boolean; orderId?: string; deliveryOtp?: string }> => {
           const deliveryOtp = Math.floor(1000 + Math.random() * 9000).toString();
           const { data: dbOrder, error: orderErr } = await supabase.from('orders').insert({
             order_number: orderNumber, user_id: user.id, customer_name: d.delivery.receiverName, delivery_date: deliveryDateStr,
-            status: 'pending', kind: 'group', payment_status: 'paid',
+            status: 'pending', kind: 'group', payment_status: 'pending', // Webhook sets to paid
             subtotal: Math.round(summary.subtotal), gst_amount: Math.round(summary.gst),
-            delivery_fee: Math.round(summary.deliveryFee),
-            total: Math.round(summary.total), delivery_details: d.delivery,
+            delivery_fee: Math.round(summary.deliveryFee), total: Math.round(summary.total),
+            delivery_details: d.delivery,
             meta: { people: groupDraft.people, deliveryAt: groupDraft.deliveryAt, delivery_otp: deliveryOtp }
           }).select('id').single();
-
-          if (orderErr || !dbOrder) { setPayError(`Order save failed: ${orderErr?.message}`); return; }
+          if (orderErr || !dbOrder) { setPayError(`Order init failed: ${orderErr?.message}`); return { success: false }; }
 
           if (cartItems.length > 0) {
             await supabase.from('order_items').insert(
               cartItems.map(({ item, qty }) => ({ order_id: dbOrder.id, menu_item_id: item.id, item_name: item.name, quantity: qty, unit_price: item.priceINR }))
             );
           }
-
-          const receipt: OrderReceipt = {
-            id: orderNumber, kind: "group", createdAt: Date.now(),
-            headline: "Group Order Confirmed", deliveryAtLabel: groupDraft.deliveryAt || "Scheduled delivery",
-            customer: { ...d.delivery, receiverPhone: "+91" + d.delivery.receiverPhone.slice(-10), instructions: d.delivery.instructions || undefined },
-            payment: "PAID",
-            meta: { people: groupDraft.people, deliveryAt: groupDraft.deliveryAt },
-            lines: cartItems.map(({ item, qty }) => ({ itemId: item.id, label: item.name, qty, unitPriceAtOrder: item.priceINR })),
-            priceSummary: summary,
-          };
-          setLastOrder(receipt);
-          setGroupCart({});
-          setGroupDraft({ people: 10, deliveryAt: "", notes: "" });
-          // Success overlay will handle navigation after delay
+          return { success: true, orderId: dbOrder.id, deliveryOtp };
         };
+
+        const initResult = await processOrder();
+        if (!initResult.success || !initResult.orderId) return;
 
         await openPayment({
           amount: summary.total,
@@ -1184,16 +1234,30 @@ export function CheckoutGroupPage({
           customerName: d.delivery.receiverName,
           customerEmail: user.email || '',
           customerPhone: d.delivery.receiverPhone,
-          onFailure: (reason) => {
+          onFailure: async (reason) => {
             setPayError(reason);
             setOrderStatus("failure");
+            await supabase.from('orders').update({ status: 'cancelled', payment_status: 'failed' }).eq('id', initResult.orderId);
           },
-          onSuccess: async () => {
+          onSuccess: async (paymentId, razorpayOrderId) => {
             setOrderStatus("success");
-            await processOrder();
-            setTimeout(() => {
-              setRoute("order-confirmation");
-            }, 2000);
+            await supabase.from('orders').update({
+              status: 'preparing', payment_status: 'paid',
+              meta: { people: groupDraft.people, deliveryAt: groupDraft.deliveryAt, delivery_otp: initResult.deliveryOtp, razorpay_payment_id: paymentId, razorpay_order_id: razorpayOrderId }
+            }).eq('id', initResult.orderId);
+
+            const receipt: OrderReceipt = {
+              id: orderNumber, kind: "group", createdAt: Date.now(),
+              headline: "Group Order Confirmed", deliveryAtLabel: groupDraft.deliveryAt || "Scheduled delivery",
+              customer: { ...d.delivery, receiverPhone: "+91" + d.delivery.receiverPhone.slice(-10), instructions: d.delivery.instructions || undefined },
+              payment: "PAID", meta: { people: groupDraft.people, deliveryAt: groupDraft.deliveryAt, delivery_otp: initResult.deliveryOtp },
+              lines: cartItems.map(({ item, qty }) => ({ itemId: item.id, label: item.name, qty, unitPriceAtOrder: item.priceINR })),
+              priceSummary: summary,
+            };
+            setLastOrder(receipt);
+            setGroupCart({});
+            setGroupDraft({ people: 10, deliveryAt: "", notes: "" });
+            setTimeout(() => { setRoute("order-confirmation"); }, 2000);
           },
         });
       }}
@@ -1217,7 +1281,7 @@ export function CheckoutGroupPage({
             title="Catering Items" 
             items={priceItems} 
             gstRate={gstRate} 
-            discountPct={groupDiscount.value} 
+            discountPct={effectiveDiscount} 
             discountLabel="Group Discount" 
             deliveryFee={isPickup ? 0 : deliveryFeeSetting.value} 
             isFreeDelivery={freeDeliverySetting.value} 
@@ -1243,186 +1307,203 @@ export function OrderConfirmationPage({
 
   if (!lastOrder) {
     return (
-      <div className="mx-auto max-w-3xl px-4 py-10 animate-fade-in">
-        <Card>
-          <CardHeader>
-            <LuxuryLabel text="No recent order" />
-            <div className="mt-2 text-sm text-black/55">Place an order to see confirmation.</div>
-          </CardHeader>
-          <CardContent>
-            <Button onClick={onGoHome}>Go to Home</Button>
-          </CardContent>
-        </Card>
+      <div className="mx-auto max-w-lg px-4 py-20 animate-fade-in flex flex-col items-center justify-center text-center">
+        <div className="w-24 h-24 bg-slate-100 rounded-full flex items-center justify-center mb-6">
+          <Receipt size={40} className="text-slate-300" />
+        </div>
+        <h2 className="text-2xl font-black text-slate-800 tracking-tight">No Active Order</h2>
+        <p className="mt-2 text-slate-500 max-w-xs">It looks like you haven't placed a recent order, or the session has expired.</p>
+        <Button onClick={onGoHome} className="mt-8 px-8 py-3 rounded-2xl bg-slate-900 text-white font-bold hover:bg-slate-800 transition-all shadow-lg hover:shadow-xl hover:-translate-y-1">
+          Back to Home
+        </Button>
       </div>
     );
   }
 
   const o = lastOrder;
   const when = formatDateTimeIndia(o.createdAt);
+  const isPickup = o.customer.isPickup;
+
+  const containerVariants = { hidden: { opacity: 0 }, show: { opacity: 1, transition: { staggerChildren: 0.1, delayChildren: 0.2 } } };
+  const fadeUp = { hidden: { opacity: 0, y: 20 }, show: { opacity: 1, y: 0, transition: { type: "spring" as const, stiffness: 300, damping: 24 } } };
 
   return (
-    <div className="mx-auto max-w-4xl px-4 py-10 animate-fade-in-up">
-      <div className="mb-6 px-2">
-        <button 
-          onClick={onGoHome} 
-          className="text-sm font-semibold text-black/60 hover:text-black transition-colors flex items-center gap-1.5"
-        >
-          ← Back to Home
-        </button>
-      </div>
-      <Card>
-        <CardHeader>
-          <SectionTitle icon={Sparkles} title={`${o.headline} ✅`} subtitle={`Order ID: ${o.id} • ${when}`} />
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid gap-3 md:grid-cols-2">
-            <div className="rounded-2xl border border-black/10 p-4">
-              <div className="text-sm font-semibold">Delivery</div>
-              <div className="mt-1 text-sm text-black/55">{o.kind === "group" ? formatDateTimeIndia(o.deliveryAtLabel) : formatDateIndia(o.deliveryAtLabel)}</div>
-            </div>
-            <div className="rounded-2xl border border-black/10 p-4">
-              <div className="text-sm font-semibold">Payment</div>
-              <div className="mt-1 text-sm text-black/55">{o.payment}</div>
-            </div>
-            {o.kind === "personalized" && o.meta?.plan && (
-              <div className="rounded-2xl border border-violet-100 bg-violet-50 p-4 md:col-span-2">
-                <div className="text-sm font-semibold text-violet-900">Subscription Plan</div>
-                <div className="mt-1 text-sm text-violet-700 font-bold">
-                  {o.meta.plan}
-                  {o.meta.durationDays ? ` · ${o.meta.durationDays} days` : ""}
-                  {o.meta.mealsPerDay ? ` · ${o.meta.mealsPerDay} meal${o.meta.mealsPerDay > 1 ? "s" : ""}/day` : ""}
-                </div>
-                {o.meta.chargeableDeliveries != null && (
-                  <div className="mt-0.5 text-xs text-violet-500">{o.meta.chargeableDeliveries} scheduled deliveries</div>
-                )}
-              </div>
-            )}
-          </div>
+    <div className="min-h-[90vh] flex flex-col items-center justify-start px-4 py-12 relative overflow-hidden bg-slate-50/50">
+      {/* Background Magic Elements */}
+      <div className="absolute top-0 w-full h-[500px] bg-gradient-to-b from-emerald-100/60 to-transparent -z-10" />
+      <motion.div initial={{ scale: 0.8, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ duration: 1, ease: "easeOut" }}
+        className="absolute top-[-200px] left-1/2 -translate-x-1/2 w-[600px] h-[600px] bg-emerald-300/20 blur-[100px] rounded-full -z-10" />
+      
+      {/* Hero Success Badge */}
+      <motion.div 
+        initial={{ scale: 0, rotate: -20 }} animate={{ scale: 1, rotate: 0 }} transition={{ type: "spring", bounce: 0.5, duration: 0.8 }}
+        className="w-24 h-24 bg-gradient-to-br from-emerald-400 to-emerald-600 rounded-full flex items-center justify-center shadow-[0_0_50px_rgba(16,185,129,0.3)] mb-6 z-10 relative"
+      >
+        <CheckCircle2 size={48} className="text-white relative z-10" />
+        <div className="absolute inset-0 bg-emerald-400 rounded-full animate-ping opacity-20" />
+      </motion.div>
 
-          <div className="rounded-2xl border border-black/10 p-4">
-            <div className="text-sm font-semibold">Customer</div>
-            <div className="mt-2 text-sm text-black/55 space-y-1">
-              <div>{o.customer.receiverName}</div>
-              <div>{o.customer.receiverPhone}</div>
-              <div>{[o.customer.building, o.customer.street, o.customer.area].filter(Boolean).join(', ')}</div>
-              {o.customer.instructions ? <div className="italic">Instr: {o.customer.instructions}</div> : null}
-            </div>
-          </div>
+      <motion.h1 initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }}
+        className="text-3xl sm:text-4xl font-black text-slate-900 tracking-tighter text-center mb-2">
+        {o.headline}
+      </motion.h1>
+      <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.4 }} className="text-slate-500 font-medium mb-8 text-center px-4">
+        We've received your request and the kitchen has been notified!
+      </motion.p>
 
-          <div className="rounded-2xl border border-black/10 p-4">
-            <div className="flex items-start justify-between gap-2">
-              <div>
-                <div className="text-sm font-semibold">Items</div>
-                <div className="mt-1 text-xs text-black/50">Details for the food items in your order.</div>
-              </div>
-              <div className="text-xs text-black/55 truncate max-w-[100px]">Kind: {o.kind}</div>
-            </div>
+      {/* The Digital Receipt */}
+      <motion.div 
+        variants={containerVariants} initial="hidden" animate="show"
+        className="w-full max-w-2xl bg-white rounded-[2rem] shadow-2xl relative z-10 overflow-hidden border border-slate-100"
+      >
+        {/* Receipt Header Pattern */}
+        <div className="h-4 w-full bg-slate-800" style={{ backgroundImage: 'radial-gradient(circle, #fff 2px, transparent 3px)', backgroundSize: '12px 10px', backgroundPosition: '-6px 0px' }} />
 
-            <div className="mt-3 space-y-2 text-sm">
-              {o.lines.length ? (
-                o.lines.slice(0, 120).map((l, idx) => {
-                  const atPrice = l.unitPriceAtOrder;
-                  const showPrice = typeof atPrice === "number";
-                  return (
-                    <div key={idx} className="rounded-xl border border-black/10 p-2">
-                      <div className="flex items-center justify-between">
-                        <span className="font-medium">{l.label}</span>
-                        <span className="text-black/55">×{l.qty}</span>
-                      </div>
-                      {showPrice ? (
-                        <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-black/55">
-                          <span>Price at order: {typeof atPrice === "number" ? formatINR(atPrice) : "—"}</span>
-                        </div>
-                      ) : null}
+        <div className="p-6 sm:p-10">
+          {/* Order Meta Header */}
+          <motion.div variants={fadeUp} className="flex flex-col sm:flex-row justify-between items-start sm:items-center pb-6 border-b-2 border-dashed border-slate-200 gap-4">
+            <div>
+              <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">Order Number</p>
+              <div className="text-lg font-black font-mono text-slate-800 tracking-wider">#{o.id.toUpperCase()}</div>
+            </div>
+            <div className="text-left sm:text-right">
+              <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">Placed On</p>
+              <div className="text-sm font-bold text-slate-700 font-mono">{when}</div>
+            </div>
+          </motion.div>
+
+          {/* Quick Info Grid */}
+          <motion.div variants={fadeUp} className="grid sm:grid-cols-2 gap-4 py-6 border-b-2 border-dashed border-slate-200">
+             <div className="flex gap-4 p-4 rounded-2xl bg-slate-50 border border-slate-100">
+               <div className="w-10 h-10 rounded-xl bg-orange-100 text-orange-600 flex items-center justify-center shrink-0">
+                 {isPickup ? <Store size={20} /> : <MapPin size={20} />}
+               </div>
+               <div>
+                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-0.5">{isPickup ? 'Store Pickup' : 'Delivery To'}</p>
+                  <p className="text-sm font-bold text-slate-800 leading-tight">
+                    {o.customer.receiverName}
+                    {!isPickup && <span className="block text-xs font-medium text-slate-500 mt-0.5">{[o.customer.building, o.customer.street, o.customer.area].filter(Boolean).join(', ')}</span>}
+                  </p>
+               </div>
+             </div>
+             
+             <div className="flex gap-4 p-4 rounded-2xl bg-slate-50 border border-slate-100">
+               <div className="w-10 h-10 rounded-xl bg-indigo-100 text-indigo-600 flex items-center justify-center shrink-0">
+                 <Clock size={20} />
+               </div>
+               <div>
+                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-0.5">Estimated Time</p>
+                  <p className="text-sm font-bold text-slate-800 leading-tight">
+                    {o.kind === "group" ? formatDateTimeIndia(o.deliveryAtLabel) : formatDateIndia(o.deliveryAtLabel)}
+                    {o.kind === "personalized" && <span className="block text-xs font-medium text-slate-500 mt-0.5">{o.meta?.durationDays} Days Schedule</span>}
+                  </p>
+               </div>
+             </div>
+
+             {/* Subscription Badge */}
+             {o.kind === "personalized" && o.meta?.plan && (
+               <div className="sm:col-span-2 flex items-center gap-3 p-4 rounded-2xl bg-violet-50 border border-violet-100">
+                 <Sparkles className="text-violet-500 shrink-0" size={20} />
+                 <div>
+                   <p className="text-xs font-black text-violet-900 tracking-tight">{o.meta.plan} Subscription Active</p>
+                   <p className="text-[10px] text-violet-600 font-bold mt-0.5">{o.meta.chargeableDeliveries} Deliveries Planned across {o.meta.durationDays} days</p>
+                 </div>
+               </div>
+             )}
+          </motion.div>
+
+          {/* Items List */}
+          <motion.div variants={fadeUp} className="py-6 border-b-2 border-dashed border-slate-200">
+            <h3 className="text-xs font-black uppercase tracking-widest text-slate-400 mb-4 flex items-center gap-2">
+              <Package size={14} /> Order Items
+            </h3>
+            <div className="space-y-4">
+              {o.lines.slice(0, 10).map((l, idx) => (
+                <div key={idx} className="flex justify-between items-start gap-4">
+                  <div className="flex gap-3">
+                    <div className="text-sm font-bold text-slate-800">{l.qty}x</div>
+                    <div>
+                      <div className="text-sm font-bold text-slate-700">{l.label}</div>
                     </div>
-                  );
-                })
-              ) : (
-                <div className="text-black/55">No items.</div>
+                  </div>
+                  <div className="text-sm font-bold text-slate-900">
+                    {typeof l.unitPriceAtOrder === "number" ? formatINR(l.unitPriceAtOrder * l.qty) : "—"}
+                  </div>
+                </div>
+              ))}
+              {o.lines.length > 10 && (
+                <div className="text-xs font-bold text-slate-400 pt-2">+ {o.lines.length - 10} more items...</div>
               )}
-              {o.lines.length > 120 ? <div className="text-xs text-black/50">Showing first 120…</div> : null}
             </div>
-          </div>
+          </motion.div>
 
-          {o.priceSummary ? (
-            <div className="rounded-2xl border border-black/10 p-4">
-              <div className="text-sm font-semibold">Price</div>
-              <div className="mt-2 text-sm space-y-1">
-                <div className="flex items-center justify-between">
-                  <span className="text-black/55">Subtotal</span>
-                  <span className="font-medium">{formatINR(o.priceSummary.subtotal)}</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-black/55">GST ({Math.round(o.priceSummary.gstRate * 100)}%)</span>
-                  <span className="font-medium">{formatINR(o.priceSummary.gst)}</span>
-                </div>
-                {o.priceSummary.deliveryFee !== undefined && o.priceSummary.deliveryFee > 0 && (
-                  <div className="flex items-center justify-between">
-                    <span className="text-black/55">Delivery Fee</span>
-                    {o.priceSummary.isFreeDelivery ? (
-                      <div className="flex items-center gap-2">
-                        <span className="text-black/30 line-through text-xs">{formatINR(o.priceSummary.deliveryFee)}</span>
-                        <span className="font-bold text-emerald-600">FREE</span>
-                      </div>
-                    ) : (
-                      <span className="font-medium text-black">{formatINR(o.priceSummary.deliveryFee)}</span>
-                    )}
-                  </div>
-                )}
-                <div className="mt-2 flex items-center justify-between">
-                  <span className="font-semibold">Total</span>
-                  <span className="font-semibold">{formatINR(o.priceSummary.total)}</span>
-                </div>
+          {/* Pricing Totals */}
+          {o.priceSummary && (
+            <motion.div variants={fadeUp} className="pt-6 space-y-3">
+              <div className="flex justify-between text-sm text-slate-500 font-medium">
+                <span>Subtotal</span>
+                <span className="text-slate-700">{formatINR(o.priceSummary.subtotal)}</span>
               </div>
-            </div>
-          ) : null}
-
-          <div className="flex flex-col gap-2 sm:flex-row">
-            <Button onClick={onGoHome} variant="outline" className="flex-1">Go to Home</Button>
-            <Button onClick={onGoDashboard} variant="outline" className="flex-1">Go to Dashboard</Button>
-            {o.kind !== "regular" && (
-              <Button onClick={() => onModify(o.kind)} className="flex-1">Modify Schedule / Details</Button>
-            )}
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Floating Action Bar for Pickup Orders */}
-      {o.customer.isPickup && (
-        <>
-          <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[100] w-[95%] max-w-4xl px-2 text-center sm:text-left">
-            <AnimatePresence>
-              <motion.div 
-                initial={{ y: 20, opacity: 0 }}
-                animate={{ y: 0, opacity: 1 }}
-                transition={{ duration: 0.4, ease: "easeOut" }}
-                className="backdrop-blur-xl bg-white/95 border border-emerald-200 shadow-[0_20px_50px_rgba(16,185,129,0.15)] rounded-[2rem] p-3 sm:p-4 flex flex-col sm:flex-row items-center justify-between gap-4"
-              >
-                <div className="flex-1 hidden sm:block pl-2">
-                  <div className="text-[10px] font-black uppercase text-emerald-500 tracking-wider mb-0.5">
-                    Store Pickup
-                  </div>
-                  <div className="text-sm font-bold text-emerald-900 leading-tight">
-                    Your order will be ready at our store. Get directions now.
-                  </div>
+              <div className="flex justify-between text-sm text-slate-500 font-medium">
+                <span>Taxes & GST</span>
+                <span className="text-slate-700">{formatINR(o.priceSummary.gst)}</span>
+              </div>
+              {o.priceSummary.deliveryFee !== undefined && o.priceSummary.deliveryFee > 0 && (
+                <div className="flex justify-between text-sm text-slate-500 font-medium">
+                  <span>Delivery Fee</span>
+                  {o.priceSummary.isFreeDelivery ? (
+                    <span className="text-emerald-600 font-bold uppercase tracking-wider text-xs">Free</span>
+                  ) : (
+                    <span className="text-slate-700">{formatINR(o.priceSummary.deliveryFee)}</span>
+                  )}
                 </div>
-                
-                <div className="w-full sm:w-auto">
-                  <Button
-                    size="lg"
-                    className="w-full sm:w-64 text-base font-black uppercase tracking-widest shadow-[0_10px_20px_-5px_rgba(16,185,129,0.3)] bg-emerald-600 hover:bg-emerald-700 text-white h-12 sm:h-14 rounded-2xl transition-all hover:shadow-[0_15px_30px_-5px_rgba(16,185,129,0.5)] active:scale-95 flex items-center justify-center gap-2"
-                    onClick={() => window.open(storeMapUrlSetting.value, "_blank")}
-                  >
-                    <Navigation className="h-5 w-5" /> Get Directions
-                  </Button>
-                </div>
-              </motion.div>
-            </AnimatePresence>
-          </div>
-          <div className="h-24 sm:h-32" />
-        </>
-      )}
+              )}
+              <div className="flex justify-between items-center mt-4 pt-4 border-t-2 border-slate-900 border-dashed">
+                <span className="text-lg font-black text-slate-900 uppercase tracking-tight">Total Paid</span>
+                <span className="text-2xl font-black text-emerald-600">{formatINR(o.priceSummary.total)}</span>
+              </div>
+            </motion.div>
+          )}
 
+        </div>
+        
+        {/* Receipt Footer Pattern */}
+        <div className="h-4 w-full bg-slate-100" style={{ backgroundImage: 'radial-gradient(circle, #fff 2px, transparent 3px)', backgroundSize: '12px 10px', backgroundPosition: '-6px 0px' }} />
+      </motion.div>
+
+      {/* Action Buttons */}
+      <motion.div variants={containerVariants} initial="hidden" animate="show" className="mt-8 flex flex-col sm:flex-row gap-4 w-full max-w-2xl px-4 relative z-10">
+        <motion.div variants={fadeUp} className="flex-1">
+          <Button onClick={onGoDashboard} className="w-full h-14 rounded-2xl bg-white text-slate-900 hover:bg-slate-50 hover:-translate-y-1 transition-all shadow-[0_10px_20px_rgba(0,0,0,0.05)] border border-slate-200 font-bold text-base flex justify-center items-center gap-2 group">
+            Track Order <ChevronRight size={18} className="text-slate-400 group-hover:translate-x-1 transition-transform" />
+          </Button>
+        </motion.div>
+        
+        {o.kind !== "regular" && (
+          <motion.div variants={fadeUp} className="flex-1">
+            <Button onClick={() => onModify(o.kind)} className="w-full h-14 rounded-2xl bg-indigo-600 text-white hover:bg-indigo-700 hover:-translate-y-1 transition-all shadow-lg font-bold text-base shadow-indigo-500/20 border-none">
+              Modify Schedule
+            </Button>
+          </motion.div>
+        )}
+
+        {isPickup && (
+          <motion.div variants={fadeUp} className="w-full sm:w-auto">
+             <Button onClick={() => window.open(storeMapUrlSetting.value, "_blank")} className="w-full h-14 rounded-2xl bg-emerald-600 text-white hover:bg-emerald-700 hover:-translate-y-1 transition-all shadow-lg font-bold text-base shadow-emerald-500/20 border-none flex justify-center items-center gap-2">
+                <Navigation size={18} /> Store Map
+             </Button>
+          </motion.div>
+        )}
+      </motion.div>
+      
+      <motion.button 
+        initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 1 }}
+        onClick={onGoHome} className="mt-12 text-sm font-bold text-slate-400 hover:text-slate-600 transition-colors uppercase tracking-widest relative z-10"
+      >
+        Return to Menu
+      </motion.button>
+
+      <div className="h-20" />
     </div>
   );
 }

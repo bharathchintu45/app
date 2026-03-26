@@ -143,13 +143,24 @@ export function AddonPopup({
                   {otherAddons.length > 0 && (
                     <div className="mt-2 pt-2 border-t border-slate-100">
                       <div className="text-[10px] uppercase font-bold text-slate-400 mb-1">Already attached</div>
-                      <div className="flex flex-wrap gap-1">
+                      <div className="flex flex-wrap gap-1.5">
                         {otherAddons.map((a) => (
                           <span
                             key={a.item.id}
-                            className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700"
+                            className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-1 rounded-full bg-amber-100 text-amber-700"
                           >
                             {a.item.name} ×{a.qty}
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                // Remove all qty of this addon from this slot
+                                for (let i = 0; i < a.qty; i++) removeAddon(slot, a.item);
+                              }}
+                              className="ml-0.5 p-0.5 rounded-full hover:bg-red-200 text-red-400 hover:text-red-600 transition-colors"
+                              title={`Remove ${a.item.name}`}
+                            >
+                              <X size={10} />
+                            </button>
                           </span>
                         ))}
                       </div>

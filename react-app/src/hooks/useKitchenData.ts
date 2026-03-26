@@ -25,6 +25,7 @@ export function useKitchenData(user: AppUser | null, showToast: (msg: string) =>
 
   const isFirstLoad = useRef(true);
   const currentTabRef = useRef<string>("orders");
+  const knownOrderIds = useRef<Set<string>>(new Set());
 
 
   function playBell() {
@@ -53,6 +54,7 @@ export function useKitchenData(user: AppUser | null, showToast: (msg: string) =>
     const { data, error } = await supabase
       .from('orders')
       .select(`*, order_items ( id, menu_item_id, item_name, quantity, unit_price )`)
+      .neq('payment_status', 'pending') // Prevent unpaid checkouts from appearing in kitchen
       .or(`status.in.(pending,preparing,ready,out_for_delivery),delivery_date.eq.${todayStr}`)
       .order('created_at', { ascending: false })
       .limit(150);
@@ -100,6 +102,10 @@ export function useKitchenData(user: AppUser | null, showToast: (msg: string) =>
         }))
       }));
       setOrders(mapped);
+      
+      const ids = new Set<string>();
+      mapped.forEach(o => ids.add(o.id));
+      knownOrderIds.current = ids;
     }
     setIsLoading(false);
     isFirstLoad.current = false;
@@ -147,8 +153,11 @@ export function useKitchenData(user: AppUser | null, showToast: (msg: string) =>
     const ordersChannel = supabase.channel('kitchen-orders-realtime')
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'orders' }, (payload) => {
         if (!isFirstLoad.current) {
-          playBell();
           const newOrder = payload.new as any;
+          if (newOrder.payment_status === 'pending') return; // Ignore unpaid checkout drafts
+
+          knownOrderIds.current.add(newOrder.id);
+          playBell();
           const isPickup = newOrder.delivery_details?.isPickup === true;
           const kind = newOrder.kind;
           const subTodayStr = new Date(new Date().getTime() + 5.5 * 60 * 60 * 1000).toISOString().slice(0, 10);
@@ -161,7 +170,30 @@ export function useKitchenData(user: AppUser | null, showToast: (msg: string) =>
         }
         fetchLiveOrders();
       })
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'orders' }, () => fetchLiveOrders())
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'orders' }, (payload) => {
+        const newOrder = payload.new as any;
+        console.log("🔥 [REALTIME UPDATE] Order:", newOrder.id);
+        console.log("   --> Payment Status:", newOrder.payment_status);
+        console.log("   --> Already Known?", knownOrderIds.current.has(newOrder.id));
+
+        // Trigger alerts when an abandoned checkout is verified by the Razorpay webhook
+        // Supabase does not send `old.payment_status` without REPLICA IDENTITY FULL, so we use our local Set
+        if (!isFirstLoad.current && newOrder.payment_status !== 'pending' && !knownOrderIds.current.has(newOrder.id)) {
+          knownOrderIds.current.add(newOrder.id);
+          playBell();
+          
+          const isPickup = newOrder.delivery_details?.isPickup === true;
+          const kind = newOrder.kind;
+          const subTodayStr = new Date(new Date().getTime() + 5.5 * 60 * 60 * 1000).toISOString().slice(0, 10);
+          const isTodaySub = (kind === 'personalized' || kind === 'subscription') && newOrder.delivery_date === subTodayStr;
+
+          if (currentTabRef.current !== "orders" && kind === "regular" && !isPickup) setUnreadOrders(p => p + 1);
+          if (currentTabRef.current !== "groups" && kind === "group") setUnreadGroups(p => p + 1);
+          if (currentTabRef.current !== "pickup" && isPickup) setUnreadPickups(p => p + 1);
+          if (currentTabRef.current !== "subscriptions" && isTodaySub) setUnreadSubs(p => p + 1);
+        }
+        fetchLiveOrders();
+      })
       .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'orders' }, (p) => {
         const deletedId = (p.old as any)?.id;
         if (deletedId) setOrders(prev => prev.filter(o => o.id !== deletedId));

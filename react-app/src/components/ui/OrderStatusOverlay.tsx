@@ -5,9 +5,10 @@ import { cn } from "../../lib/utils";
 interface OrderStatusOverlayProps {
   status: "success" | "failure" | "none";
   onClose?: () => void;
+  errorDetail?: string;
 }
 
-export function OrderStatusOverlay({ status, onClose }: OrderStatusOverlayProps) {
+export function OrderStatusOverlay({ status, onClose, errorDetail }: OrderStatusOverlayProps) {
   if (status === "none") return null;
 
   const isSuccess = status === "success";
@@ -81,6 +82,16 @@ export function OrderStatusOverlay({ status, onClose }: OrderStatusOverlayProps)
                   : "Something went wrong. Please check your payment and try again."
                 }
               </motion.p>
+              {!isSuccess && errorDetail && (
+                <motion.p
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  transition={{ delay: 0.4 }}
+                  className="text-xs text-rose-600/80 font-mono bg-rose-100 rounded-xl px-3 py-2 mt-1 max-w-full break-all"
+                >
+                  {errorDetail}
+                </motion.p>
+              )}
             </div>
 
             {!isSuccess && onClose && (
