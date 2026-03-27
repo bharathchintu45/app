@@ -469,6 +469,30 @@ export default function App() {
       }
     }
 
+    // ── ROLE-BASED ROUTE GUARD ──────────────────────────────────────────────
+    // Prevents ANY unauthorized user from accessing staff routes by directly
+    // typing the hash (e.g. #admin). If user has wrong role, kick to home.
+    const staffRouteRoles: Record<string, string[]> = {
+      admin:    ["admin"],
+      kitchen:  ["admin", "kitchen"],
+      manager:  ["admin", "manager"],
+      delivery: ["admin", "delivery"],
+    };
+    const allowedRoles = staffRouteRoles[route];
+    if (allowedRoles) {
+      if (!user) {
+        console.warn(`[App] Unauthenticated access to /${route}, redirecting to home.`);
+        changeRoute("home");
+        return;
+      }
+      if (!user.role || !(allowedRoles as string[]).includes(user.role)) {
+        console.warn(`[App] Unauthorized role '${user.role}' for /${route}, redirecting to home.`);
+        showToast("You don't have permission to access that page.");
+        changeRoute("home");
+        return;
+      }
+    }
+
     // Checkout protection — ONLY for checkout routes
     const isCheckout = route === "checkout-regular" || route === "checkout-personal" || route === "checkout-group";
     if (!user && isCheckout) {
@@ -557,9 +581,13 @@ export default function App() {
                   className="h-full w-full"
                 >
                   {route === "kitchen" ? (
-                    <KitchenPage user={user} onBack={() => changeRoute("home")} showToast={showToast} />
+                    (user?.role === "kitchen" || user?.role === "admin") ? (
+                      <KitchenPage user={user} onBack={() => changeRoute("home")} showToast={showToast} />
+                    ) : (
+                      <NotFoundPage onBack={() => changeRoute("home")} />
+                    )
                   ) : route === "admin" ? (
-                    isAdminPortalActive ? (
+                    user?.role === "admin" && isAdminPortalActive ? (
                       <AdminPage user={user} onBack={() => changeRoute("home")} showToast={showToast} />
                     ) : (
                       <MaintenancePage title="Admin Portal Disabled" message="Access to the Administrative Console has been restricted by the system owner." />
@@ -618,16 +646,22 @@ export default function App() {
                   ) : route === "orders" ? (
                     <OrderTrackingPage user={user} setRoute={changeRoute} showToast={showToast} />
                   ) : route === "delivery" ? (
-                    <ErrorBoundary>
-                    <DeliveryPage user={user} onBack={() => changeRoute("home")} showToast={showToast} />
-                    </ErrorBoundary>
+                    (user?.role === "delivery" || user?.role === "admin") ? (
+                      <ErrorBoundary>
+                      <DeliveryPage user={user} onBack={() => changeRoute("home")} showToast={showToast} />
+                      </ErrorBoundary>
+                    ) : (
+                      <NotFoundPage onBack={() => changeRoute("home")} />
+                    )
                   ) : route === "manager" ? (
-                    isManagerPortalActive ? (
+                    (user?.role === "manager" || user?.role === "admin") && isManagerPortalActive ? (
                       <ErrorBoundary>
                       <ManagerPage user={user} onBack={() => changeRoute("home")} showToast={showToast} />
                       </ErrorBoundary>
-                    ) : (
+                    ) : !isManagerPortalActive && (user?.role === "manager" || user?.role === "admin") ? (
                       <MaintenancePage title="Manager Portal Disabled" message="The Operations Hub is currently offline. Please contact an administrator if this is unexpected." />
+                    ) : (
+                      <NotFoundPage onBack={() => changeRoute("home")} />
                     )
                   ) : route === "about" ? (
                     <AboutPage onBack={() => changeRoute("home")} />

@@ -561,9 +561,9 @@ export function UserSettingsPage({
                                   <span className="text-xl font-black text-slate-900 leading-none">{d.getDate()}</span>
                                 </div>
                                 
-                                <div className="flex-1 min-w-0">
+                                <div className="flex-1 min-w-0 overflow-hidden">
                                   <div className="text-[10px] font-black text-indigo-500 uppercase tracking-widest mb-1">{isToday ? "Next Delivery" : "Planned Delivery"}</div>
-                                  <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3">
+                                  <div className="w-full flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 min-w-0 overflow-hidden">
                                     <div className="flex -space-x-2 shrink-0">
                                       {Array.from({ length: Math.min(3, mealsCount) }).map((_, i) => (
                                         <div key={i} className="w-8 h-8 rounded-full bg-slate-200 border-2 border-white overflow-hidden shadow-sm">
@@ -571,12 +571,12 @@ export function UserSettingsPage({
                                         </div>
                                       ))}
                                     </div>
-                                    <div className="min-w-0">
+                                    <div className="flex-1 min-w-0 overflow-hidden">
                                       <div className="text-sm md:text-base font-bold text-slate-900 leading-tight">
                                         {mealsCount} {mealsCount === 1 ? 'Meal' : 'Meals'} {isToday ? 'Today' : ''}
                                       </div>
                                       {labels && (
-                                        <div className="text-[10px] text-slate-400 font-medium truncate mt-0.5">
+                                        <div className="w-full text-[10px] text-slate-400 font-medium truncate mt-0.5">
                                           {labels}
                                         </div>
                                       )}

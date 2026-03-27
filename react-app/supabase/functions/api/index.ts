@@ -158,8 +158,20 @@ async function handleManageStaff(req: Request, headers: any) {
 }
 
 async function handleWelcomeEmail(req: Request, headers: any) {
-  const { subscriptionId } = await req.json();
+  const authHeader = req.headers.get('Authorization');
+  if (!authHeader) throw new Error('Missing authorization');
+  const token = authHeader.replace('Bearer ', '');
+  const supabaseClient = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_ANON_KEY')!, { global: { headers: { Authorization: authHeader } } });
+  const { data: authData, error: authErr } = await supabaseClient.auth.getUser(token);
+  if (authErr || !authData.user) throw new Error('Unauthorized');
+  
   const admin = supabaseAdmin();
+  const { data: profile } = await admin.from('profiles').select('role').eq('id', authData.user.id).single();
+  if (!['admin', 'kitchen', 'manager'].includes(profile?.role)) {
+    throw new Error('Forbidden: Requires staff privileges');
+  }
+
+  const { subscriptionId } = await req.json();
   const { data: sub } = await admin.from("subscriptions").select("*").eq("id", subscriptionId).single();
   if (!sub) throw new Error("Subscription not found");
 
@@ -222,7 +234,7 @@ async function handleGenerateDailyOrders(req: Request, headers: any) {
   if (!authHeader) throw new Error('Missing authorization');
 
   const token = authHeader.replace('Bearer ', '');
-  const isServiceRole = token === Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || token === 'TFB_DEBUG_VERIFY_2026';
+  const isServiceRole = token === Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 
   if (!isServiceRole) {
     const supabaseClient = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_ANON_KEY')!);
@@ -483,7 +495,7 @@ async function handleUpdateCatalog(req: Request, headers: any) {
 
   const admin = supabaseAdmin();
   const { data: profile } = await admin.from('profiles').select('role').eq('id', user.id).single();
-  if (profile?.role !== 'admin') throw new Error('Forbidden');
+  if (profile?.role !== 'admin' && profile?.role !== 'manager') throw new Error('Forbidden');
 
   const body = await req.json();
   const { action, itemId, item } = body;
@@ -600,7 +612,21 @@ async function handleManageSubscriptions(req: Request, headers: any) {
 }
 
 async function handleOrderAction(req: Request, headers: any) {
+  const authHeader = req.headers.get('Authorization');
+  if (!authHeader) throw new Error('Missing authorization');
+  
+  const token = authHeader.replace('Bearer ', '');
+  const supabaseClient = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_ANON_KEY')!, { global: { headers: { Authorization: authHeader } } });
+  
+  const { data: authData, error: authErr } = await supabaseClient.auth.getUser(token);
+  if (authErr || !authData.user) throw new Error('Unauthorized');
+
   const admin = supabaseAdmin();
+  const { data: profile } = await admin.from('profiles').select('role').eq('id', authData.user.id).single();
+  if (!['admin', 'kitchen', 'manager'].includes(profile?.role)) {
+    throw new Error('Forbidden: Requires staff privileges');
+  }
+
   const body = await req.json();
   const { orderId, action, data } = body;
 
@@ -649,7 +675,21 @@ async function handleOrderAction(req: Request, headers: any) {
 }
 
 async function handleDispatchAction(req: Request, headers: any) {
+  const authHeader = req.headers.get('Authorization');
+  if (!authHeader) throw new Error('Missing authorization');
+  
+  const token = authHeader.replace('Bearer ', '');
+  const supabaseClient = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_ANON_KEY')!, { global: { headers: { Authorization: authHeader } } });
+  
+  const { data: authData, error: authErr } = await supabaseClient.auth.getUser(token);
+  if (authErr || !authData.user) throw new Error('Unauthorized');
+
   const admin = supabaseAdmin();
+  const { data: profile } = await admin.from('profiles').select('role').eq('id', authData.user.id).single();
+  if (!['admin', 'kitchen', 'manager'].includes(profile?.role)) {
+    throw new Error('Forbidden: Requires staff privileges');
+  }
+
   const body = await req.json();
   const { action, boyId, orderId, data } = body;
 
@@ -750,40 +790,7 @@ async function handleCleanupProofs(req: Request, headers: any) {
   }), { status: 200, headers: { ...headers, 'Content-Type': 'application/json' } });
 }
 
-async function handleDebugOrders(req: Request, headers: any) {
-  const authHeader = req.headers.get('Authorization');
-  if (!authHeader) throw new Error('Missing authorization');
 
-  const token = authHeader.replace('Bearer ', '');
-  const isServiceRole = token === Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
-  
-  if (!isServiceRole) {
-    const supabaseClient = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_ANON_KEY')!);
-    const { data: authData, error: authErr } = await supabaseClient.auth.getUser(token);
-    if (authErr || !authData.user) throw new Error('Unauthorized');
-
-    const admin = supabaseAdmin();
-    const { data: profile } = await admin.from('profiles').select('role').eq('id', authData.user.id).single();
-    if (profile?.role !== 'admin' && profile?.role !== 'staff') throw new Error('Forbidden');
-  }
-
-  const admin = supabaseAdmin();
-
-  const { data: orders } = await admin.from('orders').select('*').limit(5).order('created_at', { ascending: false });
-  return new Response(JSON.stringify({ success: true, recentOrders: orders }), { status: 200, headers: { ...headers, 'Content-Type': 'application/json' } });
-}
-
-async function handleDebugSubs(req: Request, headers: any) {
-  const authHeader = req.headers.get('Authorization');
-  const token = authHeader?.replace('Bearer ', '');
-  const isServiceRole = token === Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
-  
-  if (!isServiceRole) throw new Error('Unauthorized');
-
-  const admin = supabaseAdmin();
-  const { data: subs } = await admin.from('subscriptions').select('*').limit(10);
-  return new Response(JSON.stringify({ success: true, subs }), { status: 200, headers: { ...headers, 'Content-Type': 'application/json' } });
-}
 
 // --- MAIN ROUTER ---
 
@@ -809,8 +816,7 @@ serve(async (req: Request) => {
       case '/v1/staff': return await handleManageStaff(req, headers);
       case '/v1/catalog': return await handleUpdateCatalog(req, headers);
       case '/v1/welcome': return await handleWelcomeEmail(req, headers);
-      case '/v1/debug-orders': return await handleDebugOrders(req, headers);
-      case '/v1/debug-subs': return await handleDebugSubs(req, headers);
+
       case '/v1/generate-daily-orders': return await handleGenerateDailyOrders(req, headers);
       case '/v1/subscriptions': return await handleManageSubscriptions(req, headers);
       case '/v1/orders/manage': return await handleOrderAction(req, headers);
